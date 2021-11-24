@@ -745,7 +745,7 @@ void Odometry2::hectorPoseCallback(const geometry_msgs::msg::PoseStamped::Unique
   }
 
   /* Setup variables for tfs */ /*//{*/
-  if (hector_use_ && !hector_tf_setup_ && publishing_static_tf_) {
+  if (!hector_tf_setup_ && publishing_static_tf_) {
     auto tf             = transformBetween(fcu_frame_, world_frame_);
     pos_orig_hector_[0] = tf.pose.position.x;
     pos_orig_hector_[1] = tf.pose.position.y;
