@@ -1,3 +1,5 @@
+/* includes//{*/
+
 #include <mutex>
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp/time.hpp>
@@ -17,21 +19,34 @@
 
 #include <fog_msgs/msg/control_interface_diagnostics.hpp>
 
+#include <fog_lib/scope_timer.h>
+
 #include <px4_msgs/msg/vehicle_odometry.hpp>
 
 #include <tf2_geometry_msgs/tf2_geometry_msgs.h>  // This has to be here otherwise you will get cryptic linker error about missing function 'getTimestamp'
 
 #include <nav_msgs/msg/odometry.hpp>
 
-#include <std_msgs/msg/string.hpp>
+#include <std_msgs/msg/string.hpp>/*//}*/
 
 typedef std::tuple<std::string, int>   px4_int;
 typedef std::tuple<std::string, float> px4_float;
 
+
 using namespace std::placeholders;
+using namespace fog_lib;
 
 namespace odometry2
 {
+
+enum struct odometry_state_t
+{
+  invalid,
+  not_connected,
+  gps,
+  hector,
+  missing_odometry,
+};
 
 /* class Odometry2 //{ */
 class Odometry2 : public rclcpp::Node {
@@ -40,6 +55,15 @@ public:
 
 private:
   std::atomic_bool is_initialized_ = false;
+
+  // | --------------------- Odometry states -------------------- |
+  std::recursive_mutex state_mutex_;
+  odometry_state_t     odometry_state_ = odometry_state_::not_connected
+
+      // | ----------------- Scope timer parameters ----------------- |
+      bool         scope_timer_enable_   = false;
+  rclcpp::Duration scope_timer_throttle_ = rclcpp::Duration(std::chrono::seconds(1));
+  rclcpp::Duration scope_timer_min_dur_  = rclcpp::Duration::from_seconds(0.020);
 
   // | ------------------------ TF frames ----------------------- |
   std::string uav_name_         = "";
@@ -56,18 +80,22 @@ private:
   geometry_msgs::msg::TransformStamped                 tf_world_to_ned_origin_frame_;
 
   // | ---------------------- PX parameters --------------------- |
-  std::vector<px4_int>   px4_params_int_;
-  std::vector<px4_float> px4_params_float_;
-  std::atomic_bool       set_initial_px4_params_                = false;
-  std::atomic_bool       getting_pixhawk_odom_                  = false;
-  std::atomic_bool       getting_control_interface_diagnostics_ = false;
+  std::vector<px4_int>     px4_params_int_;
+  std::vector<px4_float>   px4_params_float_;
+  std::vector<std::future> future_responses_;
+  std::atomic_bool         set_initial_px4_params_                = false;
+  bool                     param_upload_success_                  = true;
+  std::atomic_bool         getting_pixhawk_odom_                  = false;
+  std::atomic_bool         getting_control_interface_diagnostics_ = false;
+  std::mutex               param_loaded_mutex_;
 
   float      px4_position_[3];
   float      px4_orientation_[4];
   std::mutex px4_pose_mutex_;
 
   // | ----------------------- Publishers ----------------------- |
-  rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr local_odom_publisher_;
+  rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr            local_odom_publisher_;
+  rclcpp::Publisher<fog_msgs::msg::OdometryDiagnostics>::SharedPtr diagnostics_publisher_;
 
   // | ----------------------- Subscribers ---------------------- |
   rclcpp::Subscription<px4_msgs::msg::VehicleOdometry>::SharedPtr             pixhawk_odom_subscriber_;
@@ -86,10 +114,19 @@ private:
   bool setPx4FloatParamCallback(rclcpp::Client<fog_msgs::srv::SetPx4ParamFloat>::SharedFuture future);
 
   // | ------------------- Internal functions ------------------- |
-  bool setInitialPx4Params();
+  void setInitialPx4Params();
 
   void publishStaticTF();
   void publishLocalOdomAndTF();
+  void publishDiagnostics();
+
+  void update_odometry_state();
+
+  void state_odometry_not_connected();
+  void state_odometry_init();
+  void state_odometry_not_connected();
+  void state_odometry_not_connected();
+  void state_odometry_not_connected();
 
   // | -------------------- Routine handling -------------------- |
   rclcpp::CallbackGroup::SharedPtr callback_group_;
@@ -107,19 +144,19 @@ private:
 /* constructor //{ */
 Odometry2::Odometry2(rclcpp::NodeOptions options) : Node("odometry2", options) {
 
-  RCLCPP_INFO(this->get_logger(), "[%s]: Initializing...", this->get_name());
+  RCLCPP_INFO(get_logger(), "[%s]: Initializing...", get_name());
 
   // Getting
   try {
     uav_name_ = std::string(std::getenv("DRONE_DEVICE_ID"));
   }
   catch (...) {
-    RCLCPP_WARN(this->get_logger(), "[%s]: Environment variable DRONE_DEVICE_ID was not defined!", this->get_name());
+    RCLCPP_WARN(get_logger(), "[%s]: Environment variable DRONE_DEVICE_ID was not defined!", get_name());
   }
-  RCLCPP_INFO(this->get_logger(), "[%s]: UAV name is: '%s'", this->get_name(), uav_name_.c_str());
+  RCLCPP_INFO(get_logger(), "[%s]: UAV name is: '%s'", get_name(), uav_name_.c_str());
 
   /* parse general params from config file //{ */
-  RCLCPP_INFO(this->get_logger(), "-------------- Loading parameters --------------");
+  RCLCPP_INFO(get_logger(), "-------------- Loading parameters --------------");
   bool loaded_successfully = true;
 
   loaded_successfully &= parse_param("odometry_loop_rate", odometry_loop_rate_);
@@ -143,7 +180,7 @@ Odometry2::Odometry2(rclcpp::NodeOptions options) : Node("odometry2", options) {
 
   if (!loaded_successfully) {
     const std::string str = "Could not load all non-optional parameters. Shutting down.";
-    RCLCPP_ERROR(this->get_logger(), "%s", str.c_str());
+    RCLCPP_ERROR(get_logger(), "%s", str.c_str());
     rclcpp::shutdown();
     return;
   }
@@ -154,8 +191,10 @@ Odometry2::Odometry2(rclcpp::NodeOptions options) : Node("odometry2", options) {
   frd_fcu_frame_    = uav_name_ + "/frd_fcu";     // FRD frame (Front-Right-Down)
   ned_origin_frame_ = uav_name_ + "/ned_origin";  // NED frame (North-East-Down)
 
-  // publishers
-  local_odom_publisher_ = this->create_publisher<nav_msgs::msg::Odometry>("~/local_odom_out", 10);
+  // | ----------------------- Publishers ----------------------- |
+  rclcpp::QoS qos(rclcpp::KeepLast(3));
+  local_odom_publisher_  = this->create_publisher<nav_msgs::msg::Odometry>("~/local_odom_out", qos);
+  diagnostics_publisher_ = this->create_publisher<fog_msgs::msg::OdometryDiagnostics>("~/diagnostics_out", qos);
 
   // subscribers
   pixhawk_odom_subscriber_                  = this->create_subscription<px4_msgs::msg::VehicleOdometry>("~/pixhawk_odom_in", rclcpp::SystemDefaultsQoS(),
@@ -179,7 +218,7 @@ Odometry2::Odometry2(rclcpp::NodeOptions options) : Node("odometry2", options) {
   tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_, this, false);
 
   is_initialized_ = true;
-  RCLCPP_INFO(this->get_logger(), "[%s]: Initialized", this->get_name());
+  RCLCPP_INFO(get_logger(), "[%s]: Initialized", get_name());
 }
 //}
 
@@ -200,36 +239,37 @@ void Odometry2::pixhawkOdomCallback(const px4_msgs::msg::VehicleOdometry::Unique
   px4_orientation_[3] = msg->q[3];  // q.z
 
   getting_pixhawk_odom_ = true;
-  RCLCPP_INFO_ONCE(this->get_logger(), "[%s]: Getting pixhawk odometry!", this->get_name());
+  RCLCPP_INFO_ONCE(get_logger(), "[%s]: Getting pixhawk odometry!", get_name());
 }
 //}
 
 /* ControlInterfaceDiagnosticsCallback //{ */
 void Odometry2::ControlInterfaceDiagnosticsCallback([[maybe_unused]] const fog_msgs::msg::ControlInterfaceDiagnostics::UniquePtr msg) {
 
-  if (!is_initialized_ || (msg->vehicle_state.state == fog_msgs::msg::ControlInterfaceVehicleState::NOT_CONNECTED)){ 
+  // Check if the Control Interface is in the valid state to cooperate with
+  if (msg->vehicle_state.state == fog_msgs::msg::ControlInterfaceVehicleState::NOT_CONNECTED ||
+      msg->vehicle_state.state == fog_msgs::msg::ControlInterfaceVehicleState::INVALID) {
     return;
   }
 
   getting_control_interface_diagnostics_ = true;
-  RCLCPP_INFO_ONCE(this->get_logger(), "[%s]: Getting control diagnostics!", this->get_name());
-  
-  // TODO: there is no proper way how to unsubscribe from a topic yet. This will at least delete subscriber. 
-  // However DDS layer is still receiving msgs until new timer/subsriber/service is registered. 
-  // See: https://answers.ros.org/question/354792/rclcpp-how-to-unsubscribe-from-a-topic/   
-  control_interface_diagnostics_subscriber_.reset();
+  RCLCPP_INFO_ONCE(get_logger(), "[%s]: Getting control diagnostics!", get_name());
 }
 //}
 
 /* setPx4ParamIntCallback //{ */
 bool Odometry2::setPx4IntParamCallback(rclcpp::Client<fog_msgs::srv::SetPx4ParamInt>::SharedFuture future) {
   std::shared_ptr<fog_msgs::srv::SetPx4ParamInt::Response> result = future.get();
+
+  // Check if all parameters were loaded successfully
+  std::scoped_lock lock(param_loaded_mutex_);
+  param_upload_success_ = param_upload_success_ && result->success;
+
   if (result->success) {
-    RCLCPP_INFO(this->get_logger(), "[%s]: Parameter %s has been set to value: %ld", this->get_name(), result->param_name.c_str(), result->value);
+    RCLCPP_INFO(get_logger(), "[%s]: Parameter %s has been set to value: %ld", get_name(), result->param_name.c_str(), result->value);
     return true;
   } else {
-    RCLCPP_ERROR(this->get_logger(), "[%s]: Cannot set the parameter %s with message: %s", this->get_name(), result->param_name.c_str(),
-                 result->message.c_str());
+    RCLCPP_ERROR(get_logger(), "[%s]: Cannot set the parameter %s with message: %s", get_name(), result->param_name.c_str(), result->message.c_str());
     return false;
   }
 }
@@ -238,39 +278,120 @@ bool Odometry2::setPx4IntParamCallback(rclcpp::Client<fog_msgs::srv::SetPx4Param
 /* setPx4ParamFloatCallback //{ */
 bool Odometry2::setPx4FloatParamCallback(rclcpp::Client<fog_msgs::srv::SetPx4ParamFloat>::SharedFuture future) {
   std::shared_ptr<fog_msgs::srv::SetPx4ParamFloat::Response> result = future.get();
+
+  // Check if all parameters were loaded successfully
+  std::scoped_lock lock(param_loaded_mutex_);
+  param_upload_success_ = param_upload_success_ && result->success;
+
   if (result->success) {
-    RCLCPP_INFO(this->get_logger(), "[%s]: Parameter %s has been set to value: %f", this->get_name(), result->param_name.c_str(), result->value);
+    RCLCPP_INFO(get_logger(), "[%s]: Parameter %s has been set to value: %f", get_name(), result->param_name.c_str(), result->value);
     return true;
   } else {
-    RCLCPP_ERROR(this->get_logger(), "[%s]: Cannot set the parameter %s with message: %s", this->get_name(), result->param_name.c_str(),
-                 result->message.c_str());
+    RCLCPP_ERROR(get_logger(), "[%s]: Cannot set the parameter %s with message: %s", get_name(), result->param_name.c_str(), result->message.c_str());
     return false;
   }
 }
 //}
 
-/* odometryRoutine //{ */
-void Odometry2::odometryRoutine(void) {
+// --------------------------------------------------------------
+// |                      Odometry routines                     |
+// --------------------------------------------------------------
 
-  if (is_initialized_ && getting_pixhawk_odom_ && getting_control_interface_diagnostics_) {
-    RCLCPP_INFO_ONCE(this->get_logger(), "[%s]: Everything ready -> Publishing odometry", this->get_name());
-    RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 2000, "[%s]: Publishing odometry", this->get_name());
+/* odometryRoutine//{ */
+void Odometry2::odometryRoutine() {
+  scope_timer      tim(scope_timer_enable_, "odometryRoutine", get_logger(), scope_timer_throttle_, scope_timer_min_dur_);
+  std::scoped_lock lock(state_mutex_);
 
-    if (!set_initial_px4_params_) {
-      setInitialPx4Params();
+  const auto prev_state = odometry_state_;
+  update_odometry_state();
+  if (prev_state != odometry_state_)
+    publishDiagnostics();
+}
+//}
+
+/* diagnosticsRoutine(); //{ */
+void Odometry2::diagnosticsRoutine() {
+  scope_timer      tim(scope_timer_enable_, "diagnosticsRoutine", get_logger(), scope_timer_throttle_, scope_timer_min_dur_);
+  std::scoped_lock lock(state_mutex_);
+
+  // publish some diags
+  publishDiagnostics();
+}
+//}
+
+/* update_odometry_state//{ */
+// the following mutexes have to be locked by the calling function:
+// state_mutex_
+void Odometry2::update_odometry_state() {
+
+  // process the vehicle's state
+  switch (odometry_state_) {
+    case odometry_state_t::not_connected:
+      state_odometry_not_connected();
+      break;
+    case odometry_state_t::gps:
+      state_odometry_gps();
+      break;
+    case odometry_state_t::hector:
+      state_odometry_hector();
+      break;
+    case odometry_state_t::missing_odometry:
+      state_odometry_missing_odometry();
+      break;
+    default:
+      assert(false);
+      RCLCPP_ERROR(get_logger(), "Invalid odometry state, this should never happen!");
+      return;
+  }
+}
+//}
+
+
+/* state_odometry_not_connected//{ */
+// the following mutexes have to be locked by the calling function:
+// state_mutex_
+void Odometry2::state_odometry_not_connected() {
+
+  RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000, "Odometry state: Waiting to initialize Pixhawk and Control Interface.");
+
+  if (getting_pixhawk_odom_ && getting_control_interface_diagnostics_) {
+    RCLCPP_INFO(get_logger(), "[%s]: Pixhawk and Control Interface is ready", get_name());
+    odometry_state_ = odometry_state_t::init;
+  }
+}
+//}
+
+/* state_odometry_init//{ */
+// the following mutexes have to be locked by the calling function:
+// state_mutex_
+void Odometry2::state_odometry_init() {
+
+  RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000, "Odometry state: Initialize odometry module.");
+
+  if (!set_initial_px4_params_) {
+    RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000, "Setting initial PX4 parameters.");
+    setInitialPx4Params();
+  }
+
+  // Check if all PX4 parameters were set successfully
+  for (const std::future response : future_responses_) {
+    if (response.wait_for(set_initial_px4_params_timeout_) == std::future_status::timeout) {
+      RCLCPP_ERROR(get_logger(), "[%s]: Could not set param '%s'", get_name(), param_name.c_str());
+
+    } else {
       set_initial_px4_params_ = true;
     }
+  }
 
-    if (static_tf_broadcaster_ == nullptr) {
-      static_tf_broadcaster_ = std::make_shared<tf2_ros::StaticTransformBroadcaster>(this->shared_from_this());
-      publishStaticTF();
-    }
+  if (static_tf_broadcaster_ == nullptr) {
+    static_tf_broadcaster_ = std::make_shared<tf2_ros::StaticTransformBroadcaster>(this->shared_from_this());
+    publishStaticTF();
+  }
 
-    publishLocalOdomAndTF();
-
-  } else {
-    RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 2000, "[%s]: Getting PX4 odometry: %s, Getting control_interface diagnostics: %s",
-                         this->get_name(), getting_pixhawk_odom_.load() ? "TRUE" : "FALSE", getting_control_interface_diagnostics_ ? "TRUE" : "FALSE");
+  publishLocalOdomAndTF();
+  else {
+    RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 2000, "[%s]: Getting PX4 odometry: %s, Getting control_interface diagnostics: %s", get_name(),
+                         getting_pixhawk_odom_.load() ? "TRUE" : "FALSE", getting_control_interface_diagnostics_ ? "TRUE" : "FALSE");
   }
 }
 //}
@@ -369,37 +490,70 @@ void Odometry2::publishLocalOdomAndTF() {
 //}
 
 /*setInitialPx4Params//{*/
-bool Odometry2::setInitialPx4Params() {
+void Odometry2::setInitialPx4Params() {
+  rclcpp::Client<fog_msgs::srv::SetPx4ParamFloat>::SharedFuture future_response;
+
   for (const px4_int item : px4_params_int_) {
     auto request        = std::make_shared<fog_msgs::srv::SetPx4ParamInt::Request>();
     request->param_name = std::get<0>(item);
     request->value      = std::get<1>(item);
-    RCLCPP_INFO(this->get_logger(), "[%s]: Setting %s, value: %d", this->get_name(), std::get<0>(item).c_str(), std::get<1>(item));
-    auto call_result = set_px4_param_int_->async_send_request(request, std::bind(&Odometry2::setPx4IntParamCallback, this, std::placeholders::_1));
+    RCLCPP_INFO(get_logger(), "[%s]: Setting %s, value: %d", get_name(), std::get<0>(item).c_str(), std::get<1>(item));
+    set_px4_param_int_->async_send_request(request, std::bind(&Odometry2::setPx4IntParamCallback, this, std::placeholders::_1));
   }
 
   for (const px4_float item : px4_params_float_) {
     auto request        = std::make_shared<fog_msgs::srv::SetPx4ParamFloat::Request>();
     request->param_name = std::get<0>(item);
     request->value      = std::get<1>(item);
-    RCLCPP_INFO(this->get_logger(), "[%s]: Setting %s, value: %f", this->get_name(), std::get<0>(item).c_str(), std::get<1>(item));
-    auto call_result = set_px4_param_float_->async_send_request(request, std::bind(&Odometry2::setPx4FloatParamCallback, this, std::placeholders::_1));
+    RCLCPP_INFO(get_logger(), "[%s]: Setting %s, value: %f", get_name(), std::get<0>(item).c_str(), std::get<1>(item));
+    future_response = set_px4_param_float_->async_send_request(request, std::bind(&Odometry2::setPx4FloatParamCallback, this, std::placeholders::_1));
   }
-
-  return true;
+  
+  //Check if the latest 
+  if (future_response.wait_for(set_initial_px4_params_timeout_)) {
+    
+  }
 }
 
 /*//}*/
+
+// | ----------------------- Diagnostics ---------------------- |
+
+/* publishDiagnostics //{ */
+// the following mutexes have to be locked by the calling function:
+// state_mutex_
+void Odometry2::publishDiagnostics() {
+  fog_msgs::msg::OdometryDiagnostics msg;
+
+  msg.header.stamp    = get_clock()->now();
+  msg.header.frame_id = world_frame_;
+
+  msg.getting_pixhawk_odom      = getting_pixhawk_odom_;
+  msg.getting_control_interface = getting_control_interface_;
+  /* msg.vehicle_state = to_msg(vehicle_state_); */
+  /* msg.mission_state = to_msg(mission_mgr_ ? mission_mgr_->state() : mission_state_t::finished); */
+
+  /* msg.mission_id       = mission_mgr_ ? mission_mgr_->mission_id() : 0; */
+  /* msg.mission_size     = mission_mgr_ ? mission_mgr_->mission_size() : 0; */
+  /* msg.mission_waypoint = mission_mgr_ ? mission_mgr_->mission_waypoint() : 0; */
+
+  /* msg.gps_origin_set       = gps_origin_set_; */
+  /* msg.getting_odom         = getting_odom_; */
+  /* msg.getting_control_mode = getting_control_mode_; */
+
+  diagnostics_publisher_->publish(msg);
+}
+//}
 
 /* parse_param //{ */
 template <class T>
 bool Odometry2::parse_param(const std::string &param_name, T &param_dest) {
   this->declare_parameter(param_name);
   if (!this->get_parameter(param_name, param_dest)) {
-    RCLCPP_ERROR(this->get_logger(), "[%s]: Could not load param '%s'", this->get_name(), param_name.c_str());
+    RCLCPP_ERROR(get_logger(), "[%s]: Could not load param '%s'", get_name(), param_name.c_str());
     return false;
   } else {
-    RCLCPP_INFO_STREAM(this->get_logger(), "[" << this->get_name() << "]: Loaded '" << param_name << "' = '" << param_dest << "'");
+    RCLCPP_INFO_STREAM(get_logger(), "[" << get_name() << "]: Loaded '" << param_name << "' = '" << param_dest << "'");
   }
   return true;
 }

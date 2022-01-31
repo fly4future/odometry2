@@ -43,6 +43,7 @@ def generate_launch_description():
                 remappings=[
                     # publishers
                     ("~/local_odom_out", "~/local_odom"),
+                    ("~/diagnostics_out", "~/diagnostics"),
                     # subscribers
                     ("~/pixhawk_odom_in", "/" + DRONE_DEVICE_ID + "/fmu/vehicle_odometry/out"),
                     ("~/control_interface_diagnostics_in", "/" + DRONE_DEVICE_ID + "/control_interface/diagnostics"),
