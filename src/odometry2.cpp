@@ -114,7 +114,7 @@ private:
   bool setPx4FloatParamCallback(rclcpp::Client<fog_msgs::srv::SetPx4ParamFloat>::SharedFuture future);
 
   // | ------------------- Internal functions ------------------- |
-  void setInitialPx4Params();
+  bool setInitialPx4Params();
 
   void publishStaticTF();
   void publishLocalOdomAndTF();
@@ -370,7 +370,9 @@ void Odometry2::state_odometry_init() {
 
   if (!set_initial_px4_params_) {
     RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000, "Setting initial PX4 parameters.");
-    setInitialPx4Params();
+    if (setInitialPx4Params()) {
+      set_initial_px4_params_ = true;
+    }
   }
 
   // Check if all PX4 parameters were set successfully
@@ -490,30 +492,14 @@ void Odometry2::publishLocalOdomAndTF() {
 //}
 
 /*setInitialPx4Params//{*/
-void Odometry2::setInitialPx4Params() {
-  rclcpp::Client<fog_msgs::srv::SetPx4ParamFloat>::SharedFuture future_response;
+bool Odometry2::setInitialPx4Params() {
 
-  for (const px4_int item : px4_params_int_) {
-    auto request        = std::make_shared<fog_msgs::srv::SetPx4ParamInt::Request>();
-    request->param_name = std::get<0>(item);
-    request->value      = std::get<1>(item);
-    RCLCPP_INFO(get_logger(), "[%s]: Setting %s, value: %d", get_name(), std::get<0>(item).c_str(), std::get<1>(item));
-    set_px4_param_int_->async_send_request(request, std::bind(&Odometry2::setPx4IntParamCallback, this, std::placeholders::_1));
+  if (!uploadPx4Parameters(fog_msgs::srv::SetPx4ParamInt::Request, px4_params_int_, set_px4_param_int_) ||
+      !uploadPx4Parameters(fog_msgs::srv::SetPx4ParamFloat::Request, px4_params_float, set_px4_param_float_)) {
+    return false;
   }
-
-  for (const px4_float item : px4_params_float_) {
-    auto request        = std::make_shared<fog_msgs::srv::SetPx4ParamFloat::Request>();
-    request->param_name = std::get<0>(item);
-    request->value      = std::get<1>(item);
-    RCLCPP_INFO(get_logger(), "[%s]: Setting %s, value: %f", get_name(), std::get<0>(item).c_str(), std::get<1>(item));
-    future_response = set_px4_param_float_->async_send_request(request, std::bind(&Odometry2::setPx4FloatParamCallback, this, std::placeholders::_1));
-  }
-  
-  //Check if the latest 
-  if (future_response.wait_for(set_initial_px4_params_timeout_)) {
-    
-  }
-}
+  return true;
+}  // namespace odometry2
 
 /*//}*/
 
@@ -542,6 +528,42 @@ void Odometry2::publishDiagnostics() {
   /* msg.getting_control_mode = getting_control_mode_; */
 
   diagnostics_publisher_->publish(msg);
+}
+//}
+
+
+// | -------------------------- Utils ------------------------- |
+
+/* uploadPx4Parameters //{ */
+template <typename T, typename U, typename V>
+bool uploadPx4Parameters(const T &service_name, const U &param_array, const V &service_client) {
+  for (const auto item : param_array) {
+    auto request        = std::make_shared<service_name>();
+    request->param_name = std::get<0>(item);
+    request->value      = std::get<1>(item);
+    RCLCPP_INFO(get_logger(), "[%s]: Setting %s, value: %f", get_name(), std::get<0>(item).c_str(), std::get<1>(item));
+    auto future_response = service_client->async_send_request(request);
+
+    // If parameter was not set, return false and repeat
+    if (!checkPx4ParamOutput(future_response)) {
+      return false;
+    }
+  }
+  return true;
+}
+//}
+
+/* checkPx4ParamOutput //{ */
+template <typename T>
+bool checkPx4ParamOutput(const std::shared_future<T> &f) {
+  assert(f.valid());
+  if (f.wait_for(set_initial_px4_params_timeout_) == std::future_status::timeout || f.get() == nullptr) {
+    RCLCPP_ERROR(get_logger(), "[%s]: Cannot set the parameter %s with message: %s", get_name(), f.get()->param_name.c_str(), f.get()->message.c_str());
+    return false;
+  } else {
+    RCLCPP_INFO(get_logger(), "[%s]: Parameter %s has been set to value: %ld", get_name(), f.get()->param_name.c_str(), f.get()->value);
+    return true;
+  }
 }
 //}
 
