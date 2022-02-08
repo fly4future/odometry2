@@ -80,14 +80,12 @@ private:
   geometry_msgs::msg::TransformStamped                 tf_world_to_ned_origin_frame_;
 
   // | ---------------------- PX parameters --------------------- |
-  std::vector<px4_int>     px4_params_int_;
-  std::vector<px4_float>   px4_params_float_;
-  std::vector<std::future> future_responses_;
-  std::atomic_bool         set_initial_px4_params_                = false;
-  bool                     param_upload_success_                  = true;
-  std::atomic_bool         getting_pixhawk_odom_                  = false;
-  std::atomic_bool         getting_control_interface_diagnostics_ = false;
-  std::mutex               param_loaded_mutex_;
+  std::vector<px4_int>   px4_params_int_;
+  std::vector<px4_float> px4_params_float_;
+  std::atomic_bool       set_initial_px4_params_                = false;
+  bool                   param_upload_success_                  = true;
+  std::atomic_bool       getting_pixhawk_odom_                  = false;
+  std::atomic_bool       getting_control_interface_diagnostics_ = false;
 
   float      px4_position_[3];
   float      px4_orientation_[4];
@@ -110,11 +108,12 @@ private:
   void ControlInterfaceDiagnosticsCallback(const fog_msgs::msg::ControlInterfaceDiagnostics::UniquePtr msg);
 
   // | ---------------- Service clients handlers ---------------- |
-  bool setPx4IntParamCallback(rclcpp::Client<fog_msgs::srv::SetPx4ParamInt>::SharedFuture future);
-  bool setPx4FloatParamCallback(rclcpp::Client<fog_msgs::srv::SetPx4ParamFloat>::SharedFuture future);
+  /* bool setPx4IntParamCallback(rclcpp::Client<fog_msgs::srv::SetPx4ParamInt>::SharedFuture future); */
+  /* bool setPx4FloatParamCallback(rclcpp::Client<fog_msgs::srv::SetPx4ParamFloat>::SharedFuture future); */
 
   // | ------------------- Internal functions ------------------- |
   bool setInitialPx4Params();
+
 
   void publishStaticTF();
   void publishLocalOdomAndTF();
@@ -135,7 +134,13 @@ private:
 
   void odometryRoutine(void);
 
-  // utils
+  // | --------------------- Utils function --------------------- |
+  template <typename T, typename U, typename V>
+  bool uploadPx4Parameters(const T &service_name, const U &param_array, const V &service_client);
+
+  template <typename T>
+  bool checkPx4ParamSetOutput(const std::shared_future<T> &f);
+
   template <class T>
   bool parse_param(const std::string &param_name, T &param_dest);
 };
@@ -257,42 +262,6 @@ void Odometry2::ControlInterfaceDiagnosticsCallback([[maybe_unused]] const fog_m
 }
 //}
 
-/* setPx4ParamIntCallback //{ */
-bool Odometry2::setPx4IntParamCallback(rclcpp::Client<fog_msgs::srv::SetPx4ParamInt>::SharedFuture future) {
-  std::shared_ptr<fog_msgs::srv::SetPx4ParamInt::Response> result = future.get();
-
-  // Check if all parameters were loaded successfully
-  std::scoped_lock lock(param_loaded_mutex_);
-  param_upload_success_ = param_upload_success_ && result->success;
-
-  if (result->success) {
-    RCLCPP_INFO(get_logger(), "[%s]: Parameter %s has been set to value: %ld", get_name(), result->param_name.c_str(), result->value);
-    return true;
-  } else {
-    RCLCPP_ERROR(get_logger(), "[%s]: Cannot set the parameter %s with message: %s", get_name(), result->param_name.c_str(), result->message.c_str());
-    return false;
-  }
-}
-//}
-
-/* setPx4ParamFloatCallback //{ */
-bool Odometry2::setPx4FloatParamCallback(rclcpp::Client<fog_msgs::srv::SetPx4ParamFloat>::SharedFuture future) {
-  std::shared_ptr<fog_msgs::srv::SetPx4ParamFloat::Response> result = future.get();
-
-  // Check if all parameters were loaded successfully
-  std::scoped_lock lock(param_loaded_mutex_);
-  param_upload_success_ = param_upload_success_ && result->success;
-
-  if (result->success) {
-    RCLCPP_INFO(get_logger(), "[%s]: Parameter %s has been set to value: %f", get_name(), result->param_name.c_str(), result->value);
-    return true;
-  } else {
-    RCLCPP_ERROR(get_logger(), "[%s]: Cannot set the parameter %s with message: %s", get_name(), result->param_name.c_str(), result->message.c_str());
-    return false;
-  }
-}
-//}
-
 // --------------------------------------------------------------
 // |                      Odometry routines                     |
 // --------------------------------------------------------------
@@ -368,6 +337,7 @@ void Odometry2::state_odometry_init() {
 
   RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000, "Odometry state: Initialize odometry module.");
 
+  // Set and handle initial PX4 parameters setting
   if (!set_initial_px4_params_) {
     RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000, "Setting initial PX4 parameters.");
     if (setInitialPx4Params()) {
@@ -375,16 +345,7 @@ void Odometry2::state_odometry_init() {
     }
   }
 
-  // Check if all PX4 parameters were set successfully
-  for (const std::future response : future_responses_) {
-    if (response.wait_for(set_initial_px4_params_timeout_) == std::future_status::timeout) {
-      RCLCPP_ERROR(get_logger(), "[%s]: Could not set param '%s'", get_name(), param_name.c_str());
-
-    } else {
-      set_initial_px4_params_ = true;
-    }
-  }
-
+  // Handle static TF initialization
   if (static_tf_broadcaster_ == nullptr) {
     static_tf_broadcaster_ = std::make_shared<tf2_ros::StaticTransformBroadcaster>(this->shared_from_this());
     publishStaticTF();
@@ -499,8 +460,7 @@ bool Odometry2::setInitialPx4Params() {
     return false;
   }
   return true;
-}  // namespace odometry2
-
+}
 /*//}*/
 
 // | ----------------------- Diagnostics ---------------------- |
@@ -544,8 +504,8 @@ bool uploadPx4Parameters(const T &service_name, const U &param_array, const V &s
     RCLCPP_INFO(get_logger(), "[%s]: Setting %s, value: %f", get_name(), std::get<0>(item).c_str(), std::get<1>(item));
     auto future_response = service_client->async_send_request(request);
 
-    // If parameter was not set, return false and repeat
-    if (!checkPx4ParamOutput(future_response)) {
+    // If parameter was not set, return false
+    if (!checkPx4ParamSetOutput(future_response)) {
       return false;
     }
   }
@@ -553,9 +513,9 @@ bool uploadPx4Parameters(const T &service_name, const U &param_array, const V &s
 }
 //}
 
-/* checkPx4ParamOutput //{ */
+/* checkPx4ParamSetOutput //{ */
 template <typename T>
-bool checkPx4ParamOutput(const std::shared_future<T> &f) {
+bool checkPx4ParamSetOutput(const std::shared_future<T> &f) {
   assert(f.valid());
   if (f.wait_for(set_initial_px4_params_timeout_) == std::future_status::timeout || f.get() == nullptr) {
     RCLCPP_ERROR(get_logger(), "[%s]: Cannot set the parameter %s with message: %s", get_name(), f.get()->param_name.c_str(), f.get()->message.c_str());
