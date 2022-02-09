@@ -26,8 +26,7 @@
 #include <std_msgs/msg/string.hpp>
 
 #include <fog_lib/params.h>
-
-#include "gps_conversions.h"
+#include <fog_lib/gps_conversions.h>
 
 using namespace std::placeholders;
 using namespace fog_lib;
