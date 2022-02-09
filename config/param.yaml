@@ -3,6 +3,7 @@ home_position_publish_rate: 1.0 # [Hz]
 
 # px4 # #{
 px4:
+  param_set_timeout: 3 # [s] Minimal value is 1. If zero, the parameter will never be set
   EKF2_AID_MASK: 1 # default mask - use only gps
 
   # Default source of height estimation  - will be changed according to sensor reliability:

@@ -1,4 +1,5 @@
 #include <mutex>
+#include <chrono>
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp/time.hpp>
 
@@ -67,6 +68,7 @@ private:
   std::atomic_bool       getting_pixhawk_odom_                  = false;
   std::atomic_bool       getting_px4_utm_position_              = false;
   std::atomic_bool       getting_control_interface_diagnostics_ = false;
+  int                 px4_param_set_timeout_                 = 0;
 
   float      px4_position_[3];
   float      px4_orientation_[4];
@@ -104,22 +106,26 @@ private:
   void homePositionCallback(const px4_msgs::msg::HomePosition::UniquePtr msg);
   void ControlInterfaceDiagnosticsCallback(const fog_msgs::msg::ControlInterfaceDiagnostics::UniquePtr msg);
 
-  // | ---------------- Service clients handlers ---------------- |
-  bool setPx4IntParamCallback(rclcpp::Client<fog_msgs::srv::SetPx4ParamInt>::SharedFuture future);
-  bool setPx4FloatParamCallback(rclcpp::Client<fog_msgs::srv::SetPx4ParamFloat>::SharedFuture future);
-
   // | ------------------- Internal functions ------------------- |
-  bool setInitialPx4Params();
 
   void publishStaticTF();
   void publishLocalOdomAndTF();
 
   // | -------------------- Routine handling -------------------- |
-  rclcpp::TimerBase::SharedPtr     odometry_timer_;
+  rclcpp::TimerBase::SharedPtr odometry_timer_;
 
   void odometryRoutine(void);
   void homePositionPublisher(void);
 
+  // | --------------------- Utils function --------------------- |
+
+  bool setInitialPx4Params();
+
+  template <typename T, typename U, typename V>
+  bool uploadPx4Parameters(const std::shared_ptr<T> &request, const std::vector<U> &param_array, const V &service_client);
+
+  template <typename T>
+  bool checkPx4ParamSetOutput(const std::shared_future<T> &f);
 };
 //}
 
@@ -146,6 +152,8 @@ Odometry2::Odometry2(rclcpp::NodeOptions options) : Node("odometry2", options) {
 
   loaded_successfully &= parse_param("odometry_loop_rate", odometry_loop_rate, *this);
   loaded_successfully &= parse_param("home_position_publish_rate", home_position_publish_rate, *this);
+  loaded_successfully &= parse_param("px4.param_set_timeout", px4_param_set_timeout_, *this);
+
 
   int   param_int;
   float param_float;
@@ -182,9 +190,9 @@ Odometry2::Odometry2(rclcpp::NodeOptions options) : Node("odometry2", options) {
   home_position_publisher_ = this->create_publisher<px4_msgs::msg::HomePosition>("~/home_position_out", 10);
 
   // subscribers
-  pixhawk_odom_subscriber_  = this->create_subscription<px4_msgs::msg::VehicleOdometry>("~/pixhawk_odom_in", rclcpp::SystemDefaultsQoS(),
+  pixhawk_odom_subscriber_                  = this->create_subscription<px4_msgs::msg::VehicleOdometry>("~/pixhawk_odom_in", rclcpp::SystemDefaultsQoS(),
                                                                                        std::bind(&Odometry2::pixhawkOdomCallback, this, _1));
-  home_position_subscriber_ = this->create_subscription<px4_msgs::msg::HomePosition>("~/home_position_in", rclcpp::SystemDefaultsQoS(),
+  home_position_subscriber_                 = this->create_subscription<px4_msgs::msg::HomePosition>("~/home_position_in", rclcpp::SystemDefaultsQoS(),
                                                                                      std::bind(&Odometry2::homePositionCallback, this, _1));
   control_interface_diagnostics_subscriber_ = this->create_subscription<fog_msgs::msg::ControlInterfaceDiagnostics>(
       "~/control_interface_diagnostics_in", rclcpp::SystemDefaultsQoS(), std::bind(&Odometry2::ControlInterfaceDiagnosticsCallback, this, _1));
@@ -193,8 +201,8 @@ Odometry2::Odometry2(rclcpp::NodeOptions options) : Node("odometry2", options) {
   set_px4_param_int_   = this->create_client<fog_msgs::srv::SetPx4ParamInt>("~/set_px4_param_int");
   set_px4_param_float_ = this->create_client<fog_msgs::srv::SetPx4ParamFloat>("~/set_px4_param_float");
 
-  odometry_timer_ = this->create_wall_timer(std::chrono::duration<double>(1.0 / odometry_loop_rate), 
-                                            std::bind(&Odometry2::odometryRoutine, this), new_cbk_grp());
+  odometry_timer_ =
+      this->create_wall_timer(std::chrono::duration<double>(1.0 / odometry_loop_rate), std::bind(&Odometry2::odometryRoutine, this), new_cbk_grp());
   home_position_timer_ = this->create_wall_timer(std::chrono::duration<double>(1.0 / home_position_publish_rate),
                                                  std::bind(&Odometry2::homePositionPublisher, this), new_cbk_grp());
 
@@ -274,7 +282,7 @@ void Odometry2::homePositionCallback(const px4_msgs::msg::HomePosition::UniquePt
 /* ControlInterfaceDiagnosticsCallback //{ */
 void Odometry2::ControlInterfaceDiagnosticsCallback([[maybe_unused]] const fog_msgs::msg::ControlInterfaceDiagnostics::UniquePtr msg) {
 
-  if (!is_initialized_ || (msg->vehicle_state.state == fog_msgs::msg::ControlInterfaceVehicleState::NOT_CONNECTED)){ 
+  if (!is_initialized_ || (msg->vehicle_state.state == fog_msgs::msg::ControlInterfaceVehicleState::NOT_CONNECTED)) {
     return;
   }
 
@@ -288,44 +296,20 @@ void Odometry2::ControlInterfaceDiagnosticsCallback([[maybe_unused]] const fog_m
 }
 //}
 
-/* setPx4ParamIntCallback //{ */
-bool Odometry2::setPx4IntParamCallback(rclcpp::Client<fog_msgs::srv::SetPx4ParamInt>::SharedFuture future) {
-  std::shared_ptr<fog_msgs::srv::SetPx4ParamInt::Response> result = future.get();
-  if (result->success) {
-    RCLCPP_INFO(this->get_logger(), "[%s]: Parameter %s has been set to value: %ld", this->get_name(), result->param_name.c_str(), result->value);
-    return true;
-  } else {
-    RCLCPP_ERROR(this->get_logger(), "[%s]: Cannot set the parameter %s with message: %s", this->get_name(), result->param_name.c_str(),
-                 result->message.c_str());
-    return false;
-  }
-}
-//}
-
-/* setPx4ParamFloatCallback //{ */
-bool Odometry2::setPx4FloatParamCallback(rclcpp::Client<fog_msgs::srv::SetPx4ParamFloat>::SharedFuture future) {
-  std::shared_ptr<fog_msgs::srv::SetPx4ParamFloat::Response> result = future.get();
-  if (result->success) {
-    RCLCPP_INFO(this->get_logger(), "[%s]: Parameter %s has been set to value: %f", this->get_name(), result->param_name.c_str(), result->value);
-    return true;
-  } else {
-    RCLCPP_ERROR(this->get_logger(), "[%s]: Cannot set the parameter %s with message: %s", this->get_name(), result->param_name.c_str(),
-                 result->message.c_str());
-    return false;
-  }
-}
-//}
-
 /* odometryRoutine //{ */
 void Odometry2::odometryRoutine(void) {
 
   if (is_initialized_ && getting_pixhawk_odom_ && getting_control_interface_diagnostics_) {
-    RCLCPP_INFO_ONCE(this->get_logger(), "[%s]: Everything ready -> Publishing odometry", this->get_name());
-    RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 2000, "[%s]: Publishing odometry", this->get_name());
 
+    // Set and handle initial PX4 parameters setting
     if (!set_initial_px4_params_) {
-      setInitialPx4Params();
-      set_initial_px4_params_ = true;
+      RCLCPP_INFO(get_logger(), "[%s]: Setting initial PX4 parameters", this->get_name());
+      if (setInitialPx4Params()) {
+        set_initial_px4_params_ = true;
+      } else {
+        RCLCPP_WARN(get_logger(), "[%s]: Fail to set all PX4 parameters. Will repeat in next cycle", this->get_name());
+        return;
+      }
     }
 
     if (static_tf_broadcaster_ == nullptr) {
@@ -339,6 +323,9 @@ void Odometry2::odometryRoutine(void) {
     }
 
     publishLocalOdomAndTF();
+
+    RCLCPP_INFO_ONCE(this->get_logger(), "[%s]: Everything ready -> Publishing odometry", this->get_name());
+    RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 2000, "[%s]: Publishing odometry", this->get_name());
 
   } else {
     RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 2000, "[%s]: Getting PX4 odometry: %s, Getting control_interface diagnostics: %s",
@@ -467,33 +454,55 @@ void Odometry2::publishLocalOdomAndTF() {
 }
 //}
 
+// | -------------------------- Utils ------------------------- |
+
 /*setInitialPx4Params//{*/
 bool Odometry2::setInitialPx4Params() {
-  for (const px4_int& item : px4_params_int_) {
-    auto request        = std::make_shared<fog_msgs::srv::SetPx4ParamInt::Request>();
-    request->param_name = std::get<0>(item);
-    request->value      = std::get<1>(item);
-    RCLCPP_INFO(this->get_logger(), "[%s]: Setting %s, value: %d", this->get_name(), std::get<0>(item).c_str(), std::get<1>(item));
-    auto call_result = set_px4_param_int_->async_send_request(request, std::bind(&Odometry2::setPx4IntParamCallback, this, std::placeholders::_1));
-  }
 
-  for (const px4_float& item : px4_params_float_) {
-    auto request        = std::make_shared<fog_msgs::srv::SetPx4ParamFloat::Request>();
-    request->param_name = std::get<0>(item);
-    request->value      = std::get<1>(item);
-    RCLCPP_INFO(this->get_logger(), "[%s]: Setting %s, value: %f", this->get_name(), std::get<0>(item).c_str(), std::get<1>(item));
-    auto call_result = set_px4_param_float_->async_send_request(request, std::bind(&Odometry2::setPx4FloatParamCallback, this, std::placeholders::_1));
+  if (!uploadPx4Parameters(std::make_shared<fog_msgs::srv::SetPx4ParamInt::Request>(), px4_params_int_, set_px4_param_int_) ||
+      !uploadPx4Parameters(std::make_shared<fog_msgs::srv::SetPx4ParamFloat::Request>(), px4_params_float_, set_px4_param_float_)) {
+    return false;
   }
-
   return true;
 }
-
 /*//}*/
+
+/* uploadPx4Parameters //{ */
+template <typename T, typename U, typename V>
+bool Odometry2::uploadPx4Parameters(const std::shared_ptr<T> &request, const std::vector<U> &param_array, const V &service_client) {
+  // Iterate over all parameters and try to set them
+  for (const auto item : param_array) {
+    request->param_name = std::get<0>(item);
+    request->value      = std::get<1>(item);
+    RCLCPP_INFO(get_logger(), "[%s]: Setting PX4 parameter: %s to value: %f", get_name(), std::get<0>(item).c_str(), (float) std::get<1>(item));
+    auto future_response = service_client->async_send_request(request);
+
+    // If parameter was not set, return false
+    if (!checkPx4ParamSetOutput(future_response)) {
+      return false;
+    }
+  }
+  return true;
+}
+//}
+
+/* checkPx4ParamSetOutput //{ */
+template <typename T>
+bool Odometry2::checkPx4ParamSetOutput(const std::shared_future<T> &f) {
+  assert(f.valid());
+  if (f.wait_for(std::chrono::seconds(px4_param_set_timeout_)) == std::future_status::timeout || f.get() == nullptr) {
+    RCLCPP_ERROR(get_logger(), "[%s]: Cannot set the parameter %s with message: %s", get_name(), f.get()->param_name.c_str(), f.get()->message.c_str());
+    return false;
+  } else {
+    RCLCPP_INFO(get_logger(), "[%s]: Parameter %s has been set to value: %f", get_name(), f.get()->param_name.c_str(), (float) f.get()->value);
+    return true;
+  }
+}
+//}
 
 /* new_cbk_grp() method //{ */
 // just a util function that returns a new mutually exclusive callback group to shorten the call
-rclcpp::CallbackGroup::SharedPtr Odometry2::new_cbk_grp()
-{
+rclcpp::CallbackGroup::SharedPtr Odometry2::new_cbk_grp() {
   const rclcpp::CallbackGroup::SharedPtr new_group = create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
   callback_groups_.push_back(new_group);
   return new_group;
