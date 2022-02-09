@@ -68,7 +68,7 @@ private:
   std::atomic_bool       getting_pixhawk_odom_                  = false;
   std::atomic_bool       getting_px4_utm_position_              = false;
   std::atomic_bool       getting_control_interface_diagnostics_ = false;
-  int                 px4_param_set_timeout_                 = 0;
+  int                    px4_param_set_timeout_                 = 0;
 
   float      px4_position_[3];
   float      px4_orientation_[4];
@@ -471,7 +471,7 @@ bool Odometry2::setInitialPx4Params() {
 template <typename T, typename U, typename V>
 bool Odometry2::uploadPx4Parameters(const std::shared_ptr<T> &request, const std::vector<U> &param_array, const V &service_client) {
   // Iterate over all parameters and try to set them
-  for (const auto item : param_array) {
+  for (const auto &item : param_array) {
     request->param_name = std::get<0>(item);
     request->value      = std::get<1>(item);
     RCLCPP_INFO(get_logger(), "[%s]: Setting PX4 parameter: %s to value: %f", get_name(), std::get<0>(item).c_str(), (float) std::get<1>(item));
