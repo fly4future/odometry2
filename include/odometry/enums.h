@@ -1,5 +1,5 @@
-#ifndef ENUMS_H
-#define ENUMS_H
+#ifndef ODOMETRY_ENUMS
+#define ODOMETRY_ENUMS
 
 #include <cassert>
 #include <fog_msgs/msg/odometry_vehicle_state.hpp>
@@ -27,8 +27,10 @@ static inline odometry_state_t to_enum(const fog_msgs::msg::OdometryVehicleState
       return odometry_state_t::not_connected;
     case fog_msgs::msg::OdometryVehicleState::INIT:
       return odometry_state_t::init;
-    case fog_msgs::msg::OdometryVehicleState::PUBLISHING:
-      return odometry_state_t::publishing;
+    case fog_msgs::msg::OdometryVehicleState::GPS:
+      return odometry_state_t::gps;
+    case fog_msgs::msg::OdometryVehicleState::HECTOR:
+      return odometry_state_t::hector;
     case fog_msgs::msg::OdometryVehicleState::MISSING_ODOMETRY:
       return odometry_state_t::missing_odometry;
     default:

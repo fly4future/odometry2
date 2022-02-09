@@ -110,6 +110,9 @@ private:
   std::atomic_bool hector_reset_called_ = false;
   std::atomic_bool published_hector     = false;
 
+  std::chrono::time_point<std::chrono::high_resolution_clock> time_odometry_timer_prev_;
+  std::atomic_bool                                            time_odometry_timer_set_ = false;
+
   // | --------------------- Callback groups -------------------- |
   // a shared pointer to each callback group has to be saved or the callbacks will never get called
   std::vector<rclcpp::CallbackGroup::SharedPtr> callback_groups_;
@@ -139,6 +142,11 @@ private:
   // | ----------------------- Publishing ----------------------- |
   void publishStaticTF();
   void publishLocalOdomAndTF();
+
+  // --------------------------------------------------------------
+  // |                     Internal functions                     |
+  // --------------------------------------------------------------
+  bool checkHectorReliability();
 
   // --------------------------------------------------------------
   // |                          Routines                          |
@@ -305,6 +313,58 @@ Odometry2::Odometry2(rclcpp::NodeOptions options) : Node("odometry2", options) {
 // |                     Odometry callbacks                     |
 // --------------------------------------------------------------
 
+/* hectorPoseCallback //{ */
+void Odometry2::hectorPoseCallback(const geometry_msgs::msg::PoseStamped::UniquePtr msg) {
+
+  std::scoped_lock lock(mutex_hector_raw_);
+
+  // If not initialized, or hector not used
+  if (!is_initialized_) {
+    return;
+  }
+
+  RCLCPP_INFO_ONCE(get_logger(), "[%s]: Getting hector poses!", this->get_name());
+
+  time_hector_last_msg_ = std::chrono::system_clock::now();
+
+  /* Infinite value check//{*/
+  if (!std::isfinite(msg->pose.position.x)) {
+    RCLCPP_ERROR_THROTTLE(this->get_logger(), *this->get_clock(), 1000, "[%s]: not finite value detected in variable \"pose.position.x\" (hectorcallback) !!!",
+                          this->get_name());
+    return;
+  }
+
+  if (!std::isfinite(msg->pose.position.y)) {
+    RCLCPP_ERROR_THROTTLE(this->get_logger(), *this->get_clock(), 1000, "[%s]: not finite value detected in variable \"pose.position.y\" (hectorCallback) !!!",
+                          this->get_name());
+    return;
+  } /*//}*/
+
+  /*Hector convergence//{*/
+  // Wait for hector to converge
+  if (c_hector_init_msgs_++ < hector_num_init_msgs_) {
+    RCLCPP_INFO(this->get_logger(), "[%s]: Hector pose #%d - x: %f y: %f", this->get_name(), c_hector_init_msgs_, msg->pose.position.x, msg->pose.position.y);
+    pos_hector_raw_[0] = msg->pose.position.x;
+    pos_hector_raw_[1] = msg->pose.position.y;
+    return;
+  } /*//}*/
+
+  /* RCLCPP_INFO(this->get_logger(), "[%s]: Hector pose - x: %f y: %f", this->get_name(), msg->pose.position.x, msg->pose.position.y); */
+
+  // Update previous hector position for the reliability check
+  pos_hector_raw_prev_[0] = pos_hector_raw_[0];
+  pos_hector_raw_prev_[1] = pos_hector_raw_[1];
+
+  // Save current hector position
+  pos_hector_raw_[0] = msg->pose.position.x;
+  pos_hector_raw_[1] = msg->pose.position.y;
+
+  /* got_hector_lat_correction_ = true; */
+  RCLCPP_INFO_ONCE(this->get_logger(), "[%s]: Getting hector lateral corrections", this->get_name());
+  getting_hector_ = true;
+}
+//}
+
 /* pixhawkOdomCallback //{ */
 void Odometry2::pixhawkOdomCallback(const px4_msgs::msg::VehicleOdometry::UniquePtr msg) {
   std::scoped_lock lock(px4_pose_mutex_);
@@ -383,6 +443,12 @@ void Odometry2::update_odometry_state() {
     case odometry_state_t::publishing:
       state_odometry_publishing();
       break;
+    case odometry_state_t::gps:
+      state_odometry_gps();
+      break;
+    case odometry_state_t::hector:
+      state_odometry_hector();
+      break;
     case odometry_state_t::missing_odometry:
       state_odometry_missing_odometry();
       break;
@@ -411,6 +477,8 @@ void Odometry2::state_odometry_not_connected() {
 /* state_odometry_init//{ */
 // the following mutexes have to be locked by the calling function:
 // state_mutex_
+// gps_mutex_
+// hector_mutex_
 void Odometry2::state_odometry_init() {
 
   RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000, "Odometry state: Initializing odometry module.");
@@ -432,8 +500,14 @@ void Odometry2::state_odometry_init() {
     publishStaticTF();
   }
 
-  // Proceed to publishing state
-  odometry_state_ = odometry_state_t::publishing;
+  // Wait until at least one estimator is available
+  if (gps_state_ == estimator_state_t::realiable || hector_state_ == estimator_state_t::reliable) {
+    odometry_state_ = odometry_state_t::publishing;
+    return;
+  } else {
+    RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000, "Odometry state: Waiting for a reliable estimator.");
+    return;
+  }
 }
 //}
 
@@ -442,11 +516,67 @@ void Odometry2::state_odometry_init() {
 // state_mutex_
 void Odometry2::state_odometry_publishing() {
 
-  RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000, "Odometry state: Publishing odometry.");
+  RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000, "Odometry state: Publishing");
 
   publishLocalOdomAndTF();
 
+  if (gps_use_) {
+    odometry_state_ = odometry_state_t::gps;
+  } else if (hector_use_) {
+    odometry_state_ = odometry_state_t::hector;
+  } else {
+    odometry_state_ = odometry_state_t::missing_odometry;
+    assert(false);
+    RCLCPP_ERROR(get_logger(), "No estimator chosen by the user.");
+  }
+
+  if () {
+  }
+
   // IF BOTH GPS AND HECTOR ARE BAD, CHANGE STATE TO MISSING_ODOMETRY
+}
+//}
+
+/* state_odometry_gps//{ */
+// the following mutexes have to be locked by the calling function:
+// state_mutex_
+void Odometry2::state_odometry_gps() {
+
+  RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000, "Odometry state: Using GPS odometry");
+
+  /* publishLocalOdomAndTF(); */
+
+  if () {
+  }
+
+  // IF BOTH GPS AND HECTOR ARE BAD, CHANGE STATE TO MISSING_ODOMETRY
+}
+//}
+
+/* state_odometry_gps//{ */
+// the following mutexes have to be locked by the calling function:
+// state_mutex_
+void Odometry2::state_odometry_gps() {
+
+  RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000, "Odometry state: Using GPS odometry");
+
+  /* publishLocalOdomAndTF(); */
+
+  if () {
+  }
+
+  // IF BOTH GPS AND HECTOR ARE BAD, CHANGE STATE TO MISSING_ODOMETRY
+}
+//}
+
+/* state_odometry_hector//{ */
+// the following mutexes have to be locked by the calling function:
+// state_mutex_
+void Odometry2::state_odometry_hector() {
+
+  RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000, "Odometry state: Using hector odometry");
+
+  // CALL LAND IF REQUIRED BY THE RULES OR FORCE HOVER UNTIL ODOMETRY RELIABLE ENOUGH
 }
 //}
 
@@ -455,7 +585,7 @@ void Odometry2::state_odometry_publishing() {
 // state_mutex_
 void Odometry2::state_odometry_missing_odometry() {
 
-  RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000, "Odometry state: Missing odometry.");
+  RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000, "Odometry state: Missing odometry");
 
   // CALL LAND IF REQUIRED BY THE RULES OR FORCE HOVER UNTIL ODOMETRY RELIABLE ENOUGH
 }
@@ -611,9 +741,44 @@ void Odometry2::state_hector_init() {
   RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000, "Hector state: Waiting to receive hector data.");
 
   if (getting_hector_) {
-    RCLCPP_INFO(get_logger(), "[%s]: Hector received", get_name());
+    RCLCPP_INFO(get_logger(), "[%s]: Hector data received", get_name());
     hector_state_ = estimator_state_t::not_reliable;
+  } else {
+    // Waiting to receive hector
+    return;
   }
+
+  // Wait to obtain pixhawk odom to attach hector tf accordingly
+  if (!getting_pixhawk_odom_) {
+    RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 1000, "[%s]: Waiting for pixhawk odom to initialize tf", this->get_name());
+    return;
+  }
+
+  /* Setup hector_origin based on current gps_position */ /*//{*/
+  if (publishing_static_tf_) {
+    auto tf             = transformBetween(fcu_frame_, world_frame_);
+    pos_orig_hector_[0] = tf.pose.position.x;
+    pos_orig_hector_[1] = tf.pose.position.y;
+    pos_orig_hector_[2] = 0;
+    ori_orig_hector_[0] = tf.pose.orientation.w;
+    ori_orig_hector_[1] = tf.pose.orientation.x;
+    ori_orig_hector_[2] = tf.pose.orientation.y;
+    ori_orig_hector_[3] = tf.pose.orientation.z;
+    RCLCPP_INFO(this->get_logger(), "[%s]: Hector origin coordinates set - x: %f y: %f z: %f, w: %f, x: %f, y: %f, z: %f", this->get_name(),
+                pos_orig_hector_[0], pos_orig_hector_[1], pos_orig_hector_[2], ori_orig_hector_[0], ori_orig_hector_[1], ori_orig_hector_[2],
+                ori_orig_hector_[3]);
+    hector_tf_setup_ = true;
+  }
+
+  // Initialize estimator timer
+  if (!time_odometry_timer_set_) {
+    time_odometry_timer_prev_ = std::chrono::high_resolution_clock::now();
+    time_odometry_timer_set_  = true;
+  }
+
+  hector_state_ = estimator_state_t::reliable;
+
+  /*//}*/
 }
 //}
 
@@ -623,6 +788,25 @@ void Odometry2::state_hector_init() {
 void Odometry2::state_hector_reliable() {
 
   RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000, "Hector state: Reliable");
+
+  // Check hector reliability
+  if (!checkHectorReliability()) {
+    hector_state_ = estimator_state_t::not_reliable;
+    return;
+  }
+
+  // Add data into estimator, process the data
+
+  // Calculate time since last estimators update
+  std::chrono::time_point<std::chrono::high_resolution_clock> time_now = std::chrono::high_resolution_clock::now();
+  std::chrono::duration<double, std::milli>                   dt       = (time_now - time_odometry_timer_prev_) / 1000;
+
+  if (dt.count() <= 0) {
+    RCLCPP_WARN(this->get_logger(), "[%s]: odometry timer dt=%f is lower than zero, skipping estimator update.", this->get_name(), dt.count());
+    return;
+  }
+
+  time_odometry_timer_prev_ = time_now;
 
   // check hector reliability according to the preset rules if wrong, go to state not_reliable
 }
@@ -638,6 +822,55 @@ void odometry2::state_hector_not_reliable() {
   // check hector quality if getting better, go to reliable state
 }
 //}
+
+// | --------------------- Hector methods --------------------- |
+
+/* checkHectorReliability //{*/
+bool Odometry2::checkHectorReliability() {
+
+  std::scoped_lock lock(mutex_hector_raw_, mutex_hector_lat_estimator_);
+
+  // Check hector message interval//{
+  std::chrono::duration<double> dt = std::chrono::system_clock::now() - time_hector_last_msg_;
+
+  if (dt.count() > hector_msg_interval_warn_) {
+    RCLCPP_WARN(this->get_logger(), "[Odometry2]: Hector pose not received for %f seconds.", dt.count());
+    if (dt.count() > hector_msg_interval_max_) {
+      RCLCPP_WARN(this->get_logger(), "[Odometry2]: Hector pose not received for %f seconds. Not reliable.", dt.count());
+      return false;
+    }
+  }
+  /*//}*/
+
+  // Detect position jump in consecutive hector poses//{
+  if (std::pow(pos_hector_raw_[0] - pos_hector_raw_prev_[0], 2) > hector_max_position_jump_ ||
+      std::pow(pos_hector_raw_[1] - pos_hector_raw_prev_[1], 2) > hector_max_position_jump_) {
+    RCLCPP_WARN(this->get_logger(), "[Odometry2]: Jump detected in Hector Slam pose. orig_x: %f, orig_y: %f, x: %f, y: %f . Not reliable",
+                pos_hector_raw_prev_[0], pos_hector_raw_prev_[1], pos_hector_raw_[0], pos_hector_raw_[1]);
+    return false;
+  }
+  /*//}*/
+
+  // No update in consecutive hector poses -> no features//{
+  if (std::pow(pos_hector_raw_[0] - pos_hector_raw_prev_[0], 2) == 0 && std::pow(pos_hector_raw_[1] - pos_hector_raw_prev_[1], 2) == 0) {
+    RCLCPP_WARN(this->get_logger(), "[Odometry2]: Hector does not have any features. orig_x: %f, orig_y: %f, x: %f, y: %f . Not reliable",
+                pos_hector_raw_prev_[0], pos_hector_raw_prev_[1], pos_hector_raw_[0], pos_hector_raw_[1]);
+    return false;
+  }
+  /*//}*/
+
+  // Detect velocity jump in consecutive hector poses//{
+  double vel_x, vel_y;
+
+  hector_lat_estimator_->getState(2, vel_x);
+  hector_lat_estimator_->getState(3, vel_y);
+
+  if (vel_x > hector_max_velocity_ || vel_y > hector_max_velocity_) {
+    RCLCPP_WARN(this->get_logger(), "[Odometry2]: Hector velocity too large - x: %f, y: %f. Not reliable.", vel_x, vel_y);
+    return false;
+  } /*//}*/
+
+} /*//}*/
 
 // --------------------------------------------------------------
 // |                           Publish                          |
