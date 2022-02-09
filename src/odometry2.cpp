@@ -172,7 +172,7 @@ Odometry2::Odometry2(rclcpp::NodeOptions options) : Node("odometry2", options) {
   //}
 
   /* frame definition */
-  utm_origin_frame_   = uav_name_ + "/utm_origin";    // ENU frame (East-North-Up)
+  utm_origin_frame_   = "utm_origin";                 // ENU frame (East-North-Up)
   local_origin_frame_ = uav_name_ + "/local_origin";  // ENU frame (East-North-Up)
   fcu_frame_          = uav_name_ + "/fcu";           // FLU frame (Front-Left-Up)
   frd_fcu_frame_      = uav_name_ + "/frd_fcu";       // FRD frame (Front-Right-Down)
