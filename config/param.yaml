@@ -14,3 +14,27 @@ px4:
   EKF2_RNG_A_HMAX: 5.0 # Max height to use rangefinder for fusion in aid mode
 
 # # #}
+
+# hector # #{
+  hector:
+    use_hector: false
+    num_init_msgs: 10 # number of messages to skip before using hector messages
+    msg_interval_warn: 0.5 # interval between messages that gives warning [s]
+    msg_interval_max: 0.8 # max interval between messages before not reliable hector [s]
+    max_velocity: 2.0 # max velocity of the hector estimator to believe hector [ms-1]
+    max_position_jump: 1.0 # max position difference between consequent hector poses. 4 is default [m]
+    reset_wait: 5.0 # wait time until the next hector reset attempt [s]
+    fusion_wait: 3.0 # wait for fusion of the hector data after each reset  [s]
+# # #}
+
+# lateral estimation # #{
+  lateral:
+
+    measurement_covariance: # the covariance used when this measurement is used as correction in Kalman filter
+      hector: 0.001
+
+    process_covariance: # the process covariance used in the prediction step of the Kalman filter
+      pos: 1.0 # 0.01 
+      vel: 10.0 # 0.1
+      acc: 100.0 # 1.0
+# # #}

@@ -30,6 +30,9 @@
 #include <std_msgs/msg/string.hpp>
 
 #include "odometry/enums.h"
+#include "types.h"
+#include "odometry_utils.h"
+#include "lateral_estimator.h"
 
 /*//}*/
 
@@ -78,13 +81,31 @@ private:
   std::atomic_bool       getting_pixhawk_odom_                  = false;
   std::atomic_bool       getting_control_interface_diagnostics_ = false;
 
-  float      px4_position_[3];
-  float      px4_orientation_[4];
   std::mutex px4_pose_mutex_;
+
+  float px4_position_[3];
+  float px4_orientation_[4];
+
+  // | --------------------- GPS parameters --------------------- |
+  std::atomic_bool gps_use_ = true;
+  std::mutex       gps_raw_mutex_;
+  float            gps_eph_;
+  /* float            pos_gps_offset_[2]; */
+
+  int   c_gps_init_msgs_       = 0;
+  float gps_eph_max_           = 0;
+  int   gps_msg_good_          = 0;
+  int   gps_msg_err_           = 0;
+  int   c_gps_eph_err_         = 0;
+  int   c_gps_eph_good_        = 0;
+  int   gps_num_init_msgs_     = 0;
+  float gps_msg_interval_max_  = 0.0;
+  float gps_msg_interval_warn_ = 0.0;
 
   // | -------------------- Hector parameters ------------------- |
   std::atomic_bool getting_hector_ = false;
   std::atomic_bool hector_use_     = false;
+  std::mutex       hector_raw_mutex_;
 
   int    c_hector_init_msgs_       = 0;
   int    hector_num_init_msgs_     = 0;
@@ -100,25 +121,23 @@ private:
 
   float            current_visual_odometry_[2];
   float            pos_hector_[3];
-  std::mutex       hector_raw_mutex_;
   float            pos_hector_raw_prev_[2];
   float            pos_hector_raw_[2];
   float            ori_hector_[4];
   float            pos_orig_hector_[3];
   float            ori_orig_hector_[4];
-  std::atomic_bool hector_tf_setup_     = false;
-  std::atomic_bool hector_reset_called_ = false;
-  std::atomic_bool published_hector     = false;
+  std::atomic_bool hector_tf_setup_ = false;
+  std::atomic_bool published_hector = false;
 
   std::chrono::time_point<std::chrono::high_resolution_clock> time_odometry_timer_prev_;
-  std::atomic_bool                                            time_odometry_timer_set_ = false;
+  std::atomic_bool                                            time_odometry_timer_set_  = false;
+  std::chrono::time_point<std::chrono::system_clock>          hector_reset_called_time_ = std::chrono::system_clock::now();  // Last hector reset time
 
   // | -------------------- Lateral estimator ------------------- |
 
   std::mutex                        mutex_hector_lat_estimator_;
   std::shared_ptr<LateralEstimator> hector_lat_estimator_;
   std::vector<lat_R_t>              R_lat_vec_;
-  std::atomic_bool                  got_hector_lat_correction_ = false;
 
   // | --------------------- Callback groups -------------------- |
   // a shared pointer to each callback group has to be saved or the callbacks will never get called
@@ -141,6 +160,8 @@ private:
 
   // | ------------------ Subscriber callbacks ------------------ |
   void pixhawkOdomCallback(const px4_msgs::msg::VehicleOdometry::UniquePtr msg);
+  void hectorPoseCallback(const geometry_msgs::msg::PoseStamped::UniquePtr msg);
+  void gpsCallback(const px4_msgs::msg::VehicleGpsPosition::UniquePtr msg);
   void ControlInterfaceDiagnosticsCallback(const fog_msgs::msg::ControlInterfaceDiagnostics::UniquePtr msg);
 
   // | -------------------------- Utils ------------------------- |
@@ -154,6 +175,7 @@ private:
   // |                     Internal functions                     |
   // --------------------------------------------------------------
   bool checkHectorReliability();
+  bool checkGpsReliability();
 
   // --------------------------------------------------------------
   // |                          Routines                          |
@@ -220,9 +242,6 @@ private:
 
   template <typename T>
   bool checkPx4ParamSetOutput(const std::shared_future<T> &f);
-
-  template <class T>
-  bool parse_param(const std::string &param_name, T &param_dest);
 };
 //}
 
@@ -244,24 +263,26 @@ Odometry2::Odometry2(rclcpp::NodeOptions options) : Node("odometry2", options) {
   RCLCPP_INFO(get_logger(), "-------------- Loading parameters --------------");
   bool loaded_successfully = true;
 
-  loaded_successfully &= parse_param("odometry_loop_rate", odometry_loop_rate_);
+  loaded_successfully &= parse_param("odometry_loop_rate", odometry_loop_rate_, *this);
+
+  loaded_successfully &= parse_param("hector.reset_wait", hector_reset_wait_, *this);
 
   int   param_int;
   float param_float;
 
-  loaded_successfully &= parse_param("px4.EKF2_AID_MASK", param_int);
+  loaded_successfully &= parse_param("px4.EKF2_AID_MASK", param_int, *this);
   px4_params_int_.push_back(px4_int("EKF2_AID_MASK", param_int));
 
-  loaded_successfully &= parse_param("px4.EKF2_RNG_AID", param_int);
+  loaded_successfully &= parse_param("px4.EKF2_RNG_AID", param_int, *this);
   px4_params_int_.push_back(px4_int("EKF2_RNG_AID", param_int));
 
-  loaded_successfully &= parse_param("px4.EKF2_HGT_MODE", param_int);
+  loaded_successfully &= parse_param("px4.EKF2_HGT_MODE", param_int, *this);
   px4_params_int_.push_back(px4_int("EKF2_HGT_MODE", param_int));
 
-  loaded_successfully &= parse_param("px4.EKF2_RNG_A_HMAX", param_float);
+  loaded_successfully &= parse_param("px4.EKF2_RNG_A_HMAX", param_float, *this);
   px4_params_float_.push_back(px4_float("EKF2_RNG_A_HMAX", param_float));
 
-  loaded_successfully &= parse_param("world_frame", world_frame_);
+  loaded_successfully &= parse_param("world_frame", world_frame_, *this);
 
   if (!loaded_successfully) {
     const std::string str = "Could not load all non-optional parameters. Shutting down.";
@@ -275,6 +296,25 @@ Odometry2::Odometry2(rclcpp::NodeOptions options) : Node("odometry2", options) {
   fcu_frame_        = uav_name_ + "/fcu";         // FLU frame (Front-Left-Up) match also ENU frame (East-North-Up)
   frd_fcu_frame_    = uav_name_ + "/frd_fcu";     // FRD frame (Front-Right-Down)
   ned_origin_frame_ = uav_name_ + "/ned_origin";  // NED frame (North-East-Down)
+
+  // | -------------------- Lateral estimator ------------------- |
+  /* lateral process covariance (Q matrix) //{ */
+
+  lat_Q_t Q_lat = lat_Q_t::Identity();
+  double  lat_pos, lat_vel, lat_acc;
+  parse_param("lateral.process_covariance.pos", lat_pos, *this);
+  Q_lat(LAT_POS_X, LAT_POS_X) *= lat_pos;
+  Q_lat(LAT_POS_Y, LAT_POS_Y) *= lat_pos;
+  parse_param("lateral.process_covariance.vel", lat_vel, *this);
+  Q_lat(LAT_VEL_X, LAT_VEL_X) *= lat_vel;
+  Q_lat(LAT_VEL_Y, LAT_VEL_Y) *= lat_vel;
+  parse_param("lateral.process_covariance.acc", lat_acc, *this);
+  Q_lat(LAT_ACC_X, LAT_ACC_X) *= lat_acc;
+  Q_lat(LAT_ACC_Y, LAT_ACC_Y) *= lat_acc;
+
+  //}
+
+  hector_lat_estimator_ = std::make_shared<LateralEstimator>("hector", Q_lat, R_lat_vec_);
 
   // | ----------------------- Publishers ----------------------- |
   rclcpp::QoS qos(rclcpp::KeepLast(3));
@@ -323,14 +363,14 @@ Odometry2::Odometry2(rclcpp::NodeOptions options) : Node("odometry2", options) {
 /* hectorPoseCallback //{ */
 void Odometry2::hectorPoseCallback(const geometry_msgs::msg::PoseStamped::UniquePtr msg) {
 
-  std::scoped_lock lock(hector_raw_mutex_);
-
-  // If not initialized, or hector not used
+  // If not initialized
   if (!is_initialized_) {
     return;
   }
 
   RCLCPP_INFO_ONCE(get_logger(), "[%s]: Getting hector poses!", this->get_name());
+
+  std::scoped_lock lock(hector_raw_mutex_);
 
   time_hector_last_msg_ = std::chrono::system_clock::now();
 
@@ -366,13 +406,13 @@ void Odometry2::hectorPoseCallback(const geometry_msgs::msg::PoseStamped::Unique
   pos_hector_raw_[0] = msg->pose.position.x;
   pos_hector_raw_[1] = msg->pose.position.y;
 
-  RCLCPP_INFO_ONCE(this->get_logger(), "[%s]: Getting hector lateral corrections", this->get_name());
   getting_hector_ = true;
 }
 //}
 
 /* pixhawkOdomCallback //{ */
 void Odometry2::pixhawkOdomCallback(const px4_msgs::msg::VehicleOdometry::UniquePtr msg) {
+
   std::scoped_lock lock(px4_pose_mutex_);
 
   if (!is_initialized_) {
@@ -389,6 +429,35 @@ void Odometry2::pixhawkOdomCallback(const px4_msgs::msg::VehicleOdometry::Unique
 
   getting_pixhawk_odom_ = true;
   RCLCPP_INFO_ONCE(get_logger(), "[%s]: Getting pixhawk odometry!", get_name());
+}
+//}
+
+/* gpsCallback //{ */
+void Odometry2::gpsCallback(const px4_msgs::msg::VehicleGpsPosition::UniquePtr msg) {
+
+  if (!is_initialized_) {
+    return;
+  }
+
+  RCLCPP_INFO_ONCE(this->get_logger(), "[%s] Getting Vehicle GPS!", this->get_name());
+
+  std::scoped_lock lock(gps_raw_mutex_);
+
+  time_gps_last_msg_ = std::chrono::system_clock::now();
+
+  // Waiting for gps convergence after bootup
+  if (c_gps_init_msgs_++ < gps_num_init_msgs_) {
+    RCLCPP_INFO(this->get_logger(), "[%s]: GPS pose #%d - lat: %f lon: %f", this->get_name(), c_gps_init_msgs_, msg->lat, msg->lon);
+    c_gps_init_msgs_++;
+    return;
+  }
+
+  // Save the EPH value to evaluate the GPS quality
+  // TODO: Check the https://docs.px4.io/master/en/advanced_config/parameter_reference.html website, the EPH value might be set by default to trigger failsafe,
+  // or GPS lost
+  gps_eph_ = msg->eph;
+
+  getting_gps_ = true;
 }
 //}
 
@@ -508,7 +577,7 @@ void Odometry2::state_odometry_init() {
   std::scoped_lock lock(gps_state_, hector_state_);
 
   // Wait until at least one estimator is available
-  if (gps_state_ == estimator_state_t::realiable || hector_state_ == estimator_state_t::reliable) {
+  if (gps_state_ == estimator_state_t::reliable || hector_state_ == estimator_state_t::reliable) {
     odometry_state_ = odometry_state_t::publishing;
     return;
   } else {
@@ -536,22 +605,6 @@ void Odometry2::state_odometry_publishing() {
     assert(false);
     RCLCPP_ERROR(get_logger(), "No estimator chosen by the user.");
   }
-
-  if () {
-  }
-
-  // IF BOTH GPS AND HECTOR ARE BAD, CHANGE STATE TO MISSING_ODOMETRY
-}
-//}
-
-/* state_odometry_gps//{ */
-// the following mutexes have to be locked by the calling function:
-// state_mutex_
-void Odometry2::state_odometry_gps() {
-
-  RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000, "Odometry state: Using GPS odometry");
-
-  /* publishLocalOdomAndTF(); */
 
   if () {
   }
@@ -656,10 +709,10 @@ void Odometry2::update_gps_state() {
 // gps_mutex_
 void Odometry2::state_gps_init() {
 
-  RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000, "GPS state: Waiting to receive GPS from Pixhawk.");
+  RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000, "GPS state: Waiting to receive GPS and odometry from Pixhawk.");
 
-  if (getting_pixhawk_odom_) {
-    RCLCPP_INFO(get_logger(), "[%s]: GPS received", get_name());
+  if (getting_pixhawk_odom_ && getting_gps_) {
+    RCLCPP_INFO(get_logger(), "[%s]: GPS and odometry received", get_name());
     gps_state_ = estimator_state_t::not_reliable;
   }
 }
@@ -672,7 +725,13 @@ void Odometry2::state_gps_reliable() {
 
   RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000, "GPS state: Reliable");
 
-  // check GPS reliability according to GPS quality if wrong, go to state not_reliable
+  std::scoped_lock lock(gps_raw_mutex_);
+
+  // Check gps reliability
+  if (!checkGpsReliability()) {
+    gps_state_ = estimator_state_t::not_reliable;
+    return;
+  }
 }
 //}
 
@@ -683,7 +742,21 @@ void Odometry2::state_gps_not_reliable() {
 
   RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000, "GPS state: Not reliable.");
 
-  // check GPS quality if getting better, go to reliable state
+  // GPS quality is getting better
+  if (msg->eph < gps_eph_max_) {
+    if (c_gps_eph_good_++ >= gps_msg_good_) {
+
+      RCLCPP_WARN(this->get_logger(), "[%s] GPS quality is good!", this->get_name());
+      c_gps_eph_good_ = 0;
+      gps_state_ = estimator_state_t::reliable;
+      return;
+
+    } else {
+      RCLCPP_WARN(this->get_logger(), "[%s] GPS quality is improving! #%d EPH value: %f", this->get_name(), c_gps_eph_good_, msg->eph);
+    }
+  } else {
+    c_gps_eph_good_ = 0;  // Reset the good message counter
+  }
 }
 //}
 
@@ -785,6 +858,8 @@ void Odometry2::state_hector_init() {
 
   hector_state_ = estimator_state_t::reliable;
 
+  RCLCPP_INFO(this->get_logger(), "[%s]: Hector initalizied!", this->get_name());
+
   /*//}*/
 }
 //}
@@ -796,7 +871,7 @@ void Odometry2::state_hector_reliable() {
 
   RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000, "Hector state: Reliable");
 
-  std::scoped_lock lock(mutex_hector_lat_estimator_);
+  std::scoped_lock lock(hector_raw_mutex_, mutex_hector_lat_estimator_);
 
   // Check hector reliability
   if (!checkHectorReliability()) {
@@ -818,7 +893,7 @@ void Odometry2::state_hector_reliable() {
   time_odometry_timer_prev_ = time_now;
 
   // Latitude estimator update and predict
-  hector_lat_estimator_->doCorrection(hector_lat_correction_[0], hector_lat_correction_[1], LAT_HECTOR);
+  hector_lat_estimator_->doCorrection(pos_hector_raw_[0], pos_hector_raw_[1], LAT_HECTOR);
   hector_lat_estimator_->doPrediction(0.0, 0.0, dt.count());
 }
 //}
@@ -830,16 +905,59 @@ void odometry2::state_hector_not_reliable() {
 
   RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000, "Hector state: Not reliable.");
 
-  // check hector quality if getting better, go to reliable state
+  // Check the last hector reset time
+  std::chrono::duration<double> dt = std::chrono::system_clock::now() - hector_reset_called_time_;
+  if (dt.count() > hector_reset_wait_) {
+    RCLCPP_INFO(get_logger(), "[Odometry2]: Hector reset");
+    hector_state_ = estimator_state_t::restart;
+  } else {
+    RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000, "[Odometry2]: Waiting for next hector reset availability. Call again in dt: %f",
+                         hector_reset_wait_ - dt.count());
+  }
+}
+//}
+
+/* state_hector_restart//{ */
+// the following mutexes have to be locked by the calling function:
+// hector_mutex_
+void odometry2::state_hector_restart() {
+
+  RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000, "Hector state: Restart.");
+
+  std::scoped_lock lock(hector_raw_mutex_, mutex_hector_lat_estimator_);
+
+  // Reset hector estimator and variables
+  hector_lat_estimator_->setState(0, 0);
+  hector_lat_estimator_->setState(1, 0);
+  hector_lat_estimator_->setState(2, 0);
+  hector_lat_estimator_->setState(3, 0);
+  hector_lat_estimator_->setState(4, 0);
+  hector_lat_estimator_->setState(5, 0);
+  time_odometry_timer_set_ = false;
+
+  pos_hector_raw_[0]      = 0;
+  pos_hector_raw_[1]      = 0;
+  pos_hector_raw_prev_[0] = 0;
+  pos_hector_raw_prev_[1] = 0;
+
+  c_hector_init_msgs_       = 0;
+  hector_tf_setup_          = false;
+  hector_reset_called_time_ = std::chrono::system_clock::now();
+  getting_hector_           = false;
+
+  RCLCPP_INFO(this->get_logger(), "[%s]: Hector restarted!", this->get_name());
+
+  hector_state_ = estimator_state_t::init;
 }
 //}
 
 // | --------------------- Hector methods --------------------- |
 
 /* checkHectorReliability //{*/
+// the following mutexes have to be locked by the calling function:
+// hector_raw_mutex_
+// mutex_hector_lat_estimator_
 bool Odometry2::checkHectorReliability() {
-
-  std::scoped_lock lock(hector_raw_mutex_, mutex_hector_lat_estimator_);
 
   // Check hector message interval//{
   std::chrono::duration<double> dt = std::chrono::system_clock::now() - time_hector_last_msg_;
@@ -882,6 +1000,42 @@ bool Odometry2::checkHectorReliability() {
   } /*//}*/
 
 } /*//}*/
+
+/* checkGpsReliability //{*/
+// the following mutexes have to be locked by the calling function:
+// gps_raw_mutex_
+bool Odometry2::checkGpsReliability() {
+
+  // Check gps message interval//{
+  std::chrono::duration<double> dt = std::chrono::system_clock::now() - time_gps_last_msg_;
+
+  if (dt.count() > gps_msg_interval_warn_) {
+    RCLCPP_WARN(this->get_logger(), "[Odometry2]: GPS message not received for %f seconds.", dt.count());
+    if (dt.count() > gps_msg_interval_max_) {
+      RCLCPP_WARN(this->get_logger(), "[Odometry2]: GPS message not received for %f seconds. Not reliable.", dt.count());
+      return false;
+    }
+  }
+  /*//}*/
+
+  /* Check gps quality//{*/
+  if (msg->eph > gps_eph_max_) {
+    if (c_gps_eph_err_++ >= gps_msg_err_) {  // GPS quality is lower for a specific number of consecutive messages
+      RCLCPP_WARN(get_logger(), "[%s] GPS quality is too low! Not reliable", this->get_name());
+      c_gps_eph_err_ = 0;
+      return false;
+
+    } else {
+      RCLCPP_WARN(this->get_logger(), "[%s] GPS quality is too low! #%d/#%d EPH value: %f", this->get_name(), c_gps_eph_err_, gps_msg_err_, msg->eph);
+      return true;
+    }
+  } else {
+    c_gps_eph_err_ = 0;  // Reset the bad message counter
+    return true;
+  }
+  /*//}*/
+
+} /*//}*
 
 // --------------------------------------------------------------
 // |                           Publish                          |
@@ -928,6 +1082,7 @@ void Odometry2::publishStaticTF() {
 
 /* publishLocalOdomAndTF //{ */
 void Odometry2::publishLocalOdomAndTF() {
+
   std::scoped_lock lock(px4_pose_mutex_);
 
   if (tf_broadcaster_ == nullptr) {
@@ -1062,20 +1217,6 @@ rclcpp::CallbackGroup::SharedPtr Odometry::new_cbk_grp() {
   const rclcpp::CallbackGroup::SharedPtr new_group = create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
   callback_groups_.push_back(new_group);
   return new_group;
-}
-//}
-
-/* parse_param //{ */
-template <class T>
-bool Odometry2::parse_param(const std::string &param_name, T &param_dest) {
-  this->declare_parameter(param_name);
-  if (!this->get_parameter(param_name, param_dest)) {
-    RCLCPP_ERROR(get_logger(), "[%s]: Could not load param '%s'", get_name(), param_name.c_str());
-    return false;
-  } else {
-    RCLCPP_INFO_STREAM(get_logger(), "[" << get_name() << "]: Loaded '" << param_name << "' = '" << param_dest << "'");
-  }
-  return true;
 }
 //}
 
