@@ -100,7 +100,7 @@ private:
 
   float            current_visual_odometry_[2];
   float            pos_hector_[3];
-  std::mutex       mutex_hector_raw_;
+  std::mutex       hector_raw_mutex_;
   float            pos_hector_raw_prev_[2];
   float            pos_hector_raw_[2];
   float            ori_hector_[4];
@@ -112,6 +112,13 @@ private:
 
   std::chrono::time_point<std::chrono::high_resolution_clock> time_odometry_timer_prev_;
   std::atomic_bool                                            time_odometry_timer_set_ = false;
+
+  // | -------------------- Lateral estimator ------------------- |
+
+  std::mutex                        mutex_hector_lat_estimator_;
+  std::shared_ptr<LateralEstimator> hector_lat_estimator_;
+  std::vector<lat_R_t>              R_lat_vec_;
+  std::atomic_bool                  got_hector_lat_correction_ = false;
 
   // | --------------------- Callback groups -------------------- |
   // a shared pointer to each callback group has to be saved or the callbacks will never get called
@@ -316,7 +323,7 @@ Odometry2::Odometry2(rclcpp::NodeOptions options) : Node("odometry2", options) {
 /* hectorPoseCallback //{ */
 void Odometry2::hectorPoseCallback(const geometry_msgs::msg::PoseStamped::UniquePtr msg) {
 
-  std::scoped_lock lock(mutex_hector_raw_);
+  std::scoped_lock lock(hector_raw_mutex_);
 
   // If not initialized, or hector not used
   if (!is_initialized_) {
@@ -359,7 +366,6 @@ void Odometry2::hectorPoseCallback(const geometry_msgs::msg::PoseStamped::Unique
   pos_hector_raw_[0] = msg->pose.position.x;
   pos_hector_raw_[1] = msg->pose.position.y;
 
-  /* got_hector_lat_correction_ = true; */
   RCLCPP_INFO_ONCE(this->get_logger(), "[%s]: Getting hector lateral corrections", this->get_name());
   getting_hector_ = true;
 }
@@ -477,8 +483,6 @@ void Odometry2::state_odometry_not_connected() {
 /* state_odometry_init//{ */
 // the following mutexes have to be locked by the calling function:
 // state_mutex_
-// gps_mutex_
-// hector_mutex_
 void Odometry2::state_odometry_init() {
 
   RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000, "Odometry state: Initializing odometry module.");
@@ -499,6 +503,9 @@ void Odometry2::state_odometry_init() {
     static_tf_broadcaster_ = std::make_shared<tf2_ros::StaticTransformBroadcaster>(this->shared_from_this());
     publishStaticTF();
   }
+
+  // Lock both estimator mutexes, to check their status
+  std::scoped_lock lock(gps_state_, hector_state_);
 
   // Wait until at least one estimator is available
   if (gps_state_ == estimator_state_t::realiable || hector_state_ == estimator_state_t::reliable) {
@@ -789,6 +796,8 @@ void Odometry2::state_hector_reliable() {
 
   RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000, "Hector state: Reliable");
 
+  std::scoped_lock lock(mutex_hector_lat_estimator_);
+
   // Check hector reliability
   if (!checkHectorReliability()) {
     hector_state_ = estimator_state_t::not_reliable;
@@ -808,7 +817,9 @@ void Odometry2::state_hector_reliable() {
 
   time_odometry_timer_prev_ = time_now;
 
-  // check hector reliability according to the preset rules if wrong, go to state not_reliable
+  // Latitude estimator update and predict
+  hector_lat_estimator_->doCorrection(hector_lat_correction_[0], hector_lat_correction_[1], LAT_HECTOR);
+  hector_lat_estimator_->doPrediction(0.0, 0.0, dt.count());
 }
 //}
 
@@ -828,7 +839,7 @@ void odometry2::state_hector_not_reliable() {
 /* checkHectorReliability //{*/
 bool Odometry2::checkHectorReliability() {
 
-  std::scoped_lock lock(mutex_hector_raw_, mutex_hector_lat_estimator_);
+  std::scoped_lock lock(hector_raw_mutex_, mutex_hector_lat_estimator_);
 
   // Check hector message interval//{
   std::chrono::duration<double> dt = std::chrono::system_clock::now() - time_hector_last_msg_;
