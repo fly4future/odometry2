@@ -42,6 +42,7 @@ def generate_launch_description():
                     # publishers
                     ("~/local_odom_out", "~/local_odom"),
                     ("~/home_position_out", "~/home_position"),
+                    ("~/heading_out", "~/heading"),
                     # subscribers
                     ("~/pixhawk_odom_in", "/" + DRONE_DEVICE_ID + "/fmu/vehicle_odometry/out"),
                     ("~/home_position_in", "/" + DRONE_DEVICE_ID + "/fmu/home_position/out"),

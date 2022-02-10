@@ -17,6 +17,7 @@
 #include <fog_msgs/srv/set_px4_param_float.hpp>
 
 #include <fog_msgs/msg/control_interface_diagnostics.hpp>
+#include <fog_msgs/msg/heading.hpp>
 
 #include <px4_msgs/msg/vehicle_odometry.hpp>
 #include <px4_msgs/msg/home_position.hpp>
@@ -28,9 +29,11 @@
 
 #include <fog_lib/params.h>
 #include <fog_lib/gps_conversions.h>
+#include <fog_lib/geometry/misc.h>
 
 using namespace std::placeholders;
 using namespace fog_lib;
+using namespace fog_lib::geometry;
 
 namespace odometry2
 {
@@ -68,7 +71,7 @@ private:
   std::atomic_bool       getting_pixhawk_odom_                  = false;
   std::atomic_bool       getting_px4_utm_position_              = false;
   std::atomic_bool       getting_control_interface_diagnostics_ = false;
-  int                 px4_param_set_timeout_                 = 0;
+  int                    px4_param_set_timeout_                 = 0;
 
   float      px4_position_[3];
   float      px4_orientation_[4];
@@ -85,6 +88,7 @@ private:
   // | ----------------------- Publishers ----------------------- |
   rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr     local_odom_publisher_;
   rclcpp::Publisher<px4_msgs::msg::HomePosition>::SharedPtr home_position_publisher_;
+  rclcpp::Publisher<fog_msgs::msg::Heading>::SharedPtr      heading_publisher_;
 
   // | ----------------------- Subscribers ---------------------- |
   rclcpp::Subscription<px4_msgs::msg::VehicleOdometry>::SharedPtr             pixhawk_odom_subscriber_;
@@ -188,6 +192,7 @@ Odometry2::Odometry2(rclcpp::NodeOptions options) : Node("odometry2", options) {
   // publishers
   local_odom_publisher_    = this->create_publisher<nav_msgs::msg::Odometry>("~/local_odom_out", 10);
   home_position_publisher_ = this->create_publisher<px4_msgs::msg::HomePosition>("~/home_position_out", 10);
+  heading_publisher_ = this->create_publisher<fog_msgs::msg::Heading>("~/heading_out", 10);
 
   // subscribers
   pixhawk_odom_subscriber_                  = this->create_subscription<px4_msgs::msg::VehicleOdometry>("~/pixhawk_odom_in", rclcpp::SystemDefaultsQoS(),
@@ -443,14 +448,24 @@ void Odometry2::publishLocalOdomAndTF() {
 
   tf2::doTransform(pose_ned, pose_enu, tf_local_origin_to_ned_origin_frame_);
 
-  nav_msgs::msg::Odometry msg;
+  // Local odometry message
+  nav_msgs::msg::Odometry odom_msg;
 
-  msg.header.stamp    = this->get_clock()->now();
-  msg.header.frame_id = local_origin_frame_;
-  msg.child_frame_id  = frd_fcu_frame_;
-  msg.pose.pose       = pose_enu.pose;
+  odom_msg.header.stamp    = this->get_clock()->now();
+  odom_msg.header.frame_id = local_origin_frame_;
+  odom_msg.child_frame_id  = frd_fcu_frame_;
+  odom_msg.pose.pose       = pose_enu.pose;
 
-  local_odom_publisher_->publish(msg);
+  // Heading message
+  fog_msgs::msg::Heading heading_msg;
+
+  heading_msg.header.stamp = odom_msg.header.stamp;
+  heading_msg.header.frame_id = local_origin_frame_;
+  heading_msg.heading = quat2heading(pose_enu.pose.orientation);
+
+  // Publish messages
+  local_odom_publisher_->publish(odom_msg);
+  heading_publisher_->publish(heading_msg);
 }
 //}
 
@@ -474,7 +489,7 @@ bool Odometry2::uploadPx4Parameters(const std::shared_ptr<T> &request, const std
   for (const auto item : param_array) {
     request->param_name = std::get<0>(item);
     request->value      = std::get<1>(item);
-    RCLCPP_INFO(get_logger(), "[%s]: Setting PX4 parameter: %s to value: %f", get_name(), std::get<0>(item).c_str(), (float) std::get<1>(item));
+    RCLCPP_INFO(get_logger(), "[%s]: Setting PX4 parameter: %s to value: %f", get_name(), std::get<0>(item).c_str(), (float)std::get<1>(item));
     auto future_response = service_client->async_send_request(request);
 
     // If parameter was not set, return false
@@ -494,7 +509,7 @@ bool Odometry2::checkPx4ParamSetOutput(const std::shared_future<T> &f) {
     RCLCPP_ERROR(get_logger(), "[%s]: Cannot set the parameter %s with message: %s", get_name(), f.get()->param_name.c_str(), f.get()->message.c_str());
     return false;
   } else {
-    RCLCPP_INFO(get_logger(), "[%s]: Parameter %s has been set to value: %f", get_name(), f.get()->param_name.c_str(), (float) f.get()->value);
+    RCLCPP_INFO(get_logger(), "[%s]: Parameter %s has been set to value: %f", get_name(), f.get()->param_name.c_str(), (float)f.get()->value);
     return true;
   }
 }
