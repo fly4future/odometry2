@@ -86,9 +86,11 @@ enum struct estimator_state_t
 {
   invalid,
   init,
+  active,
   reliable,
   not_reliable,
   restart,
+  inactive,
 };
 
 
