@@ -5,11 +5,12 @@ hector_loop_rate:   50.0 # [Hz]
 
 # px4 # #{
   px4:
-    EKF2_AID_MASK:    329 # default mask - will be changed according to hector and gps reliability
-    EKF2_EV_DELAY:    10.0 # hector measurements delay # 100~150
-    EKF2_EV_NOISE_MD: 1 # use px4 covariances
-    EKF2_EVP_NOISE:   0.05 # position measurement covariance [m]
-    EKF2_EVV_NOISE:   0.05 # velocity measurement covariance [ms-1]
+    param_set_timeout:  1.0 # [s] Minimal value is 1. If zero, the parameter will never be set
+    EKF2_AID_MASK:      329 # default mask - will be changed according to hector and gps reliability
+    EKF2_EV_DELAY:      10.0 # hector measurements delay # 100~150
+    EKF2_EV_NOISE_MD:   1 # use px4 covariances
+    EKF2_EVP_NOISE:     0.05 # position measurement covariance [m]
+    EKF2_EVV_NOISE:     0.05 # velocity measurement covariance [ms-1]
 
     EKF2_RNG_AID:     1 # Using the range sensor to estimate height if specific conditions are met
     EKF2_RNG_A_HMAX:  5.0 # Max height to use ranger for fusion in aid mode
@@ -18,7 +19,7 @@ hector_loop_rate:   50.0 # [Hz]
     # 0 - only barometer mode,
     # 1 - only gps,
     # 2 - rangefinder height mode
-    EKF2_HGT_MODE:    0 # Default source of height estimation - will be changed according to gps and rangefinder reliability
+    EKF2_HGT_MODE:    2 # Default source of height estimation - will be changed according to gps and rangefinder reliability
 
     MPC_XY_CRUISE:    1.0 # Max speed for mission mode [ms-1]
     MC_YAWRATE_MAX:   20.0 # Max yaw rate [degs-1]
