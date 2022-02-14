@@ -9,7 +9,7 @@
 
 #include <lib/lkf.h>
 
-#include <types.h>
+#include <odometry/types.h>
 
 #define LAT_DT 0.02
 /* #define LAT_INPUT_COEFF 0.10 */
