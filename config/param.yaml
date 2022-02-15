@@ -4,8 +4,8 @@ hector_loop_rate:   50.0 # [Hz]
 # world_frame: now set by launch file argument
 
 # px4 # #{
-  px4:
-    param_set_timeout:  1.0 # [s] Minimal value is 1. If zero, the parameter will never be set
+px4:
+    param_set_timeout:  1 # Minimal value is 1. If zero, the parameter will never be set [s]
     EKF2_AID_MASK:      329 # default mask - will be changed according to hector and gps reliability
     EKF2_EV_DELAY:      10.0 # hector measurements delay # 100~150
     EKF2_EV_NOISE_MD:   1 # use px4 covariances
@@ -32,16 +32,18 @@ hector_loop_rate:   50.0 # [Hz]
 # # #}
 
 # gps # #{
-  gps:
+gps:
     active: true
     num_init_msgs:  5 # number of messages to skip before using gps
     eph_max:        3.0 # max deviation allowed to use gps source [m]
     msg_good:       5 # number of messages to confirm good gps
     msg_err:        5 # number of messages to confirm bad gps
+    msg_interval_max: 2.0 # max interval between messages before not reliable gps [s]
+    msg_interval_warn: 1.0 # interval between messages that gives warning [s]
 # # #}
 
 # hector # #{
-  hector:
+hector:
     active: false
     num_init_msgs:      10 # number of messages to skip before using hector messages
     msg_interval_warn:  0.5 # interval between messages that gives warning [s]
@@ -49,12 +51,11 @@ hector_loop_rate:   50.0 # [Hz]
     max_velocity:       2.0 # max velocity of the hector estimator to believe hector [ms-1]
     max_position_jump:  1.0 # max position difference between consequent hector poses. 4 is default [m]
     reset_wait:         5.0 # wait time until the next hector reset attempt [s]
-    reset_response_wait: 1.0 # wait time for hector response [s]
+    reset_response_wait: 1 # wait time for hector response [s]
 # # #}
 
 # lateral estimation # #{
-  lateral:
-
+lateral:
     measurement_covariance: # the covariance used when this measurement is used as correction in Kalman filter
       hector: 0.001
 

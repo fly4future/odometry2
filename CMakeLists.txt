@@ -34,6 +34,7 @@ include_directories(
 
 add_library(odometry2 SHARED
   src/odometry2.cpp
+  src/lateral_estimator.cpp
   )
 
 ament_target_dependencies(odometry2
@@ -63,6 +64,7 @@ install(
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin
+  INCLUDES DESTINATION include
   )
 
 install(DIRECTORY launch

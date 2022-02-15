@@ -43,13 +43,25 @@ def generate_launch_description():
                 remappings=[
                     # publishers
                     ("~/local_odom_out", "~/local_odom"),
-                    ("~/diagnostics_out", "~/diagnostics"),
+                    ("~/local_hector_out", "~/local_hector"),
+                    ("~/hector_odometry_out", "/" + DRONE_DEVICE_ID + "/VehicleVisualOdometry_PubSubTopic"),
+                    ("~/pixhawk_hector_out", "~/pixhawk_hector"),
+                    ("~/odometry_diagnostics_out", "~/odometry_diagnostics"),
+                    ("~/gps_diagnostics_out", "~/gps_diagnostics"),
+                    ("~/hector_diagnostics_out", "~/hector_diagnostics"),
                     # subscribers
                     ("~/pixhawk_odom_in", "/" + DRONE_DEVICE_ID + "/fmu/vehicle_odometry/out"),
+                    ("~/timesync_in", "/" + DRONE_DEVICE_ID + "/fmu/timesync/out"),
+                    ("~/gps_in", "/" + DRONE_DEVICE_ID + "/fmu/vehicle_gps_position/out"),
+                    ("~/hector_pose_in", "/" + DRONE_DEVICE_ID + "/hector_mapping/slam_out_pose"),
                     ("~/control_interface_diagnostics_in", "/" + DRONE_DEVICE_ID + "/control_interface/diagnostics"),
+                    # service_providers
+                    ("~/reset_hector_service_local_in", "~/reset_hector_service"),
+                    ("~/change_odometry_source_in", "~/change_odometry_source"),
                     # service_clients
                     ("~/set_px4_param_int", "/" + DRONE_DEVICE_ID + "/control_interface/set_px4_param_int"),
                     ("~/set_px4_param_float", "/" + DRONE_DEVICE_ID + "/control_interface/set_px4_param_float"),
+                    ("~/reset_hector_service_out", "/" + DRONE_DEVICE_ID + "/hector_mapping/reset_hector"),
                 ],
             ),
         ],
