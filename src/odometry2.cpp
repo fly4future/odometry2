@@ -2,6 +2,7 @@
 
 #include <mutex>
 #include <chrono>
+#include <limits>
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp/time.hpp>
 
@@ -472,8 +473,8 @@ Odometry2::Odometry2(rclcpp::NodeOptions options) : Node("odometry2", options) {
   // | -------------------- Service handlers -------------------- |
   const auto qos_profile  = qos.get_rmw_qos_profile();
   const auto srv_grp_ptr  = new_cbk_grp();
-  reset_hector_service_   = this->create_service<std_srvs::srv::Trigger>("~/reset_hector_service_out",
-                                                                       std::bind(&Odometry2::resetHectorCallback, this, _1, _2), qos_profile, srv_grp_ptr);
+  reset_hector_service_   = this->create_service<std_srvs::srv::Trigger>("~/reset_hector_service_out", std::bind(&Odometry2::resetHectorCallback, this, _1, _2),
+                                                                       qos_profile, srv_grp_ptr);
   change_odometry_source_ = this->create_service<fog_msgs::srv::ChangeOdometrySource>(
       "~/change_odometry_source_in", std::bind(&Odometry2::changeOdometryCallback, this, _1, _2), qos_profile, srv_grp_ptr);
 
@@ -508,7 +509,7 @@ Odometry2::Odometry2(rclcpp::NodeOptions options) : Node("odometry2", options) {
   tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_, this, false);
 
   is_initialized_ = true;
-  RCLCPP_INFO(get_logger(), "[%s]: Initialized", get_name());
+  RCLCPP_INFO(get_logger(), "Node initialized");
 }
 //}
 
@@ -1005,7 +1006,7 @@ void Odometry2::state_gps_not_reliable() {
   if (gps_eph_ < gps_eph_max_) {
     if (c_gps_eph_good_++ >= gps_msg_good_) {
 
-      RCLCPP_WARN(this->get_logger(), "[%s] GPS quality is good!", this->get_name());
+      RCLCPP_WARN(this->get_logger(), "[%s] GPS quality is good! Reliable.", this->get_name());
       c_gps_eph_good_ = 0;
       gps_state_      = estimator_state_t::reliable;
       return;
@@ -1327,6 +1328,7 @@ bool Odometry2::checkGpsReliability() {
     RCLCPP_WARN(this->get_logger(), "[Odometry2]: GPS message not received for %f seconds.", dt.count());
     if (dt.count() > gps_msg_interval_max_) {
       RCLCPP_WARN(this->get_logger(), "[Odometry2]: GPS message not received for %f seconds. Not reliable.", dt.count());
+      gps_eph_ = std::numeric_limits<float>::max(); // Set value to max in case GPS stop publishing
       return false;
     }
   }
