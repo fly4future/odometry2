@@ -126,7 +126,7 @@ private:
   float gps_msg_interval_max_  = 0.0;
   float gps_msg_interval_warn_ = 0.0;
 
-  std::chrono::time_point<std::chrono::system_clock> gps_last_msg_time_;
+  std::chrono::time_point<std::chrono::system_clock> gps_last_msg_time_ = std::chrono::system_clock::now(); // Last received message from gps
 
   // | -------------------- Hector parameters ------------------- |
   std::atomic_bool getting_hector_ = false;
@@ -418,17 +418,27 @@ Odometry2::Odometry2(rclcpp::NodeOptions options) : Node("odometry2", options) {
 
   // | -------------------- Lateral estimator ------------------- |
 
+  /* lateral measurement covariances (R matrices) //{ */
+
+  lat_R_t R_lat;
+  double  R_lat_tmp;
+  loaded_successfully &= parse_param("lateral.measurement_covariance.hector", R_lat_tmp, *this);
+  R_lat = R_lat.Identity() * R_lat_tmp;
+  R_lat_vec_.push_back(R_lat);
+
+  //}
+
   /* lateral process covariance (Q matrix) //{ */
 
   lat_Q_t Q_lat = lat_Q_t::Identity();
   double  lat_pos, lat_vel, lat_acc;
-  parse_param("lateral.process_covariance.pos", lat_pos, *this);
+  loaded_successfully &= parse_param("lateral.process_covariance.pos", lat_pos, *this);
   Q_lat(LAT_POS_X, LAT_POS_X) *= lat_pos;
   Q_lat(LAT_POS_Y, LAT_POS_Y) *= lat_pos;
-  parse_param("lateral.process_covariance.vel", lat_vel, *this);
+  loaded_successfully &= parse_param("lateral.process_covariance.vel", lat_vel, *this);
   Q_lat(LAT_VEL_X, LAT_VEL_X) *= lat_vel;
   Q_lat(LAT_VEL_Y, LAT_VEL_Y) *= lat_vel;
-  parse_param("lateral.process_covariance.acc", lat_acc, *this);
+  loaded_successfully &= parse_param("lateral.process_covariance.acc", lat_acc, *this);
   Q_lat(LAT_ACC_X, LAT_ACC_X) *= lat_acc;
   Q_lat(LAT_ACC_Y, LAT_ACC_Y) *= lat_acc;
 
@@ -504,7 +514,7 @@ Odometry2::Odometry2(rclcpp::NodeOptions options) : Node("odometry2", options) {
   tf_broadcaster_        = nullptr;
   static_tf_broadcaster_ = nullptr;
 
-  tf_buffer_ = std::make_shared<tf2_ros::Buffer>(this->get_clock());
+  tf_buffer_ = std::make_shared<tf2_ros::Buffer>(get_clock());
   tf_buffer_->setUsingDedicatedThread(true);
   tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_, this, false);
 
@@ -1096,18 +1106,12 @@ void Odometry2::update_hector_state() {
 void Odometry2::state_hector_init() {
 
   if (!getting_hector_) {
-    RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000, "Hector state: Waiting to receive hector data.");
-    return;
-  }
-
-  // Wait to obtain pixhawk odom to attach hector tf accordingly
-  if (!getting_pixhawk_odometry_) {
-    RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000, "Waiting for pixhawk odom to initialize tf");
+    RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000, "Hector state: Initializing - waiting to receive hector data.");
     return;
   }
 
   /* Setup hector_origin based on current gps_position */ /*//{*/
-  if (publishing_static_tf_) {
+  if (publishing_static_tf_ && getting_pixhawk_odometry_) {
     auto tf             = transformBetween(fcu_frame_, local_origin_frame_);
     pos_orig_hector_[0] = tf.pose.position.x;
     pos_orig_hector_[1] = tf.pose.position.y;
@@ -1119,6 +1123,9 @@ void Odometry2::state_hector_init() {
     RCLCPP_INFO(get_logger(), "Hector origin coordinates set - x: %f y: %f z: %f, w: %f, x: %f, y: %f, z: %f", pos_orig_hector_[0], pos_orig_hector_[1],
                 pos_orig_hector_[2], ori_orig_hector_[0], ori_orig_hector_[1], ori_orig_hector_[2], ori_orig_hector_[3]);
     hector_tf_setup_ = true;
+  } else {
+    RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000, "Hector state: Waiting for pixhawk odometry to initialize tf");
+    return;
   }
   /*//}*/
 
@@ -1128,7 +1135,7 @@ void Odometry2::state_hector_init() {
     time_odometry_timer_set_  = true;
   }
 
-  RCLCPP_INFO(get_logger(), "Hector initalizied!");
+  RCLCPP_INFO(get_logger(), "Hector state: Initalizied!");
 
   // Check if the estimator should be active
   if (!hector_active_) {
@@ -1512,11 +1519,13 @@ void Odometry2::publishHectorOdometry() {
 
   std::scoped_lock lock(px4_pose_mutex_, timestamp_mutex_);
 
+  RCLCPP_INFO(get_logger(), "Test 1");
   if (!tf_buffer_->canTransform(ned_origin_frame_, hector_origin_frame_, rclcpp::Time(0))) {
     RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000, "Missing hector origin frame - waiting for hector initialization.");
     return;
   }
 
+  RCLCPP_INFO(get_logger(), "Test 2");
   auto transform_stamped = tf_buffer_->lookupTransform(ned_origin_frame_, hector_origin_frame_, rclcpp::Time(0));
 
   // Transform pose, orientation and velocity
