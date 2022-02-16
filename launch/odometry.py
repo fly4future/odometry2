@@ -56,7 +56,7 @@ def generate_launch_description():
                     ("~/hector_pose_in", "/" + DRONE_DEVICE_ID + "/hector_mapping/slam_out_pose"),
                     ("~/control_interface_diagnostics_in", "/" + DRONE_DEVICE_ID + "/control_interface/diagnostics"),
                     # service_providers
-                    ("~/reset_hector_service_local_in", "~/reset_hector_service"),
+                    ("~/reset_hector_service_in", "~/reset_hector_service"),
                     ("~/change_odometry_source_in", "~/change_odometry_source"),
                     # service_clients
                     ("~/set_px4_param_int", "/" + DRONE_DEVICE_ID + "/control_interface/set_px4_param_int"),

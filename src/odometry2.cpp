@@ -478,12 +478,12 @@ Odometry2::Odometry2(rclcpp::NodeOptions options) : Node("odometry2", options) {
   // | -------------------- Service clients  -------------------- |
   set_px4_param_int_   = this->create_client<fog_msgs::srv::SetPx4ParamInt>("~/set_px4_param_int");
   set_px4_param_float_ = this->create_client<fog_msgs::srv::SetPx4ParamFloat>("~/set_px4_param_float");
-  reset_hector_client_ = this->create_client<std_srvs::srv::Trigger>("~/reset_hector_service_local_out");
+  reset_hector_client_ = this->create_client<std_srvs::srv::Trigger>("~/reset_hector_service_out");
 
   // | -------------------- Service handlers -------------------- |
   const auto qos_profile  = qos.get_rmw_qos_profile();
   const auto srv_grp_ptr  = new_cbk_grp();
-  reset_hector_service_   = this->create_service<std_srvs::srv::Trigger>("~/reset_hector_service_out", std::bind(&Odometry2::resetHectorCallback, this, _1, _2),
+  reset_hector_service_   = this->create_service<std_srvs::srv::Trigger>("~/reset_hector_service_in", std::bind(&Odometry2::resetHectorCallback, this, _1, _2),
                                                                        qos_profile, srv_grp_ptr);
   change_odometry_source_ = this->create_service<fog_msgs::srv::ChangeOdometrySource>(
       "~/change_odometry_source_in", std::bind(&Odometry2::changeOdometryCallback, this, _1, _2), qos_profile, srv_grp_ptr);
@@ -710,15 +710,15 @@ bool Odometry2::resetHectorCallback([[maybe_unused]] const std::shared_ptr<std_s
   if (hector_state_ == estimator_state_t::restart || hector_state_ == estimator_state_t::not_reliable) {
     response->message = "Hector in reset mode";
     response->success = false;
-    RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 500, "Hector is already in reset mode.");
+    RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 500, "Hector state: Already in reset mode.");
     return true;
   }
 
-  RCLCPP_INFO(get_logger(), "Hector set to restart state.");
+  RCLCPP_WARN(get_logger(), "Hector state: Hector set to restart.");
 
   hector_state_ = estimator_state_t::not_reliable;
 
-  response->message = "Hector set to restart state.";
+  response->message = "Hector set to restart.";
   response->success = true;
 
   return true;
@@ -842,7 +842,7 @@ void Odometry2::state_odometry_init() {
 // odometry_mutex_
 void Odometry2::state_odometry_switching() {
 
-  RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000, "Odometry state: Switching state");
+  RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000, "Odometry state: Switching state");
 
   // Update EKF parameters for the new estimator
   if (odometry_update_ekf_) {
@@ -864,7 +864,7 @@ void Odometry2::state_odometry_switching() {
 // odometry_mutex_
 void Odometry2::state_odometry_gps() {
 
-  RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000, "Odometry state: Using GPS odometry");
+  RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000, "Odometry state: GPS");
 
   std::scoped_lock lock(gps_mutex_);
 
@@ -879,7 +879,7 @@ void Odometry2::state_odometry_gps() {
 // odometry_mutex_
 void Odometry2::state_odometry_hector() {
 
-  RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000, "Odometry state: Using hector odometry");
+  RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000, "Odometry state: Hector");
 
   std::scoped_lock lock(hector_mutex_);
 
@@ -1222,10 +1222,10 @@ void Odometry2::state_hector_not_reliable() {
   // Check the last hector reset time
   std::chrono::duration<double> dt = std::chrono::system_clock::now() - hector_reset_called_time_;
   if (dt.count() > hector_reset_wait_) {
-    RCLCPP_INFO(get_logger(), "Hector state: State change to reset");
+    RCLCPP_INFO(get_logger(), "Hector state: State change to restart.");
     hector_state_ = estimator_state_t::restart;
   } else {
-    RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000, "Waiting for next hector reset availability. Call again in dt: %f", hector_reset_wait_ - dt.count());
+    RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000, "Hector state: Waiting for next hector reset availability. Call again in dt: %f", hector_reset_wait_ - dt.count());
   }
 }
 //}
@@ -1250,11 +1250,12 @@ void Odometry2::state_hector_restart() {
 
   // Reset hector
   auto future_response = reset_hector_client_->async_send_request(std::make_shared<std_srvs::srv::Trigger::Request>());
+  RCLCPP_INFO(get_logger(), "Hector state: Hector reset called.");
   if (future_response.wait_for(std::chrono::seconds(hector_reset_response_wait_)) == std::future_status::timeout || future_response.get() == nullptr) {
-    RCLCPP_ERROR(get_logger(), "Could not reset hector, try again soon.");
+    RCLCPP_ERROR(get_logger(), "Hector state: Could not reset hector, try again soon.");
     return;
   } else {
-    RCLCPP_INFO(get_logger(), "Hector node reset successfull.");
+    RCLCPP_INFO(get_logger(), "Hector state: Hector node reset successfull.");
   }
 
   // Reset hector estimator and variables
@@ -1276,7 +1277,7 @@ void Odometry2::state_hector_restart() {
   hector_reset_called_time_ = std::chrono::system_clock::now();
   getting_hector_           = false;
 
-  RCLCPP_INFO(get_logger(), "Hector restarted!");
+  RCLCPP_INFO(get_logger(), "Hector state: Hector restarted!");
 
   hector_state_ = estimator_state_t::init;
 }
@@ -1531,7 +1532,7 @@ void Odometry2::publishHectorOdometry() {
 
   std::string temp;
   if (!tf_buffer_->canTransform(ned_origin_frame_, hector_origin_frame_, rclcpp::Time(0), std::chrono::duration<double>(0), &temp)) {
-    RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000, "Missing hector origin frame - waiting for hector initialization.");
+    RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000, "Hector state: Missing hector origin frame - waiting for hector initialization.");
     return;
   }
 
@@ -1719,10 +1720,13 @@ bool Odometry2::updateEkfParameters() {
   std::vector<px4_int> px4_params_int;
   px4_params_int.push_back(px4_int("EKF2_HGT_MODE", hector_default_hgt_mode_));  // Always want to use the default height sensor
 
-  if (odometry_state_ == odometry_state_t::gps) {
+  if (switching_state_ == odometry_state_t::gps) {
     px4_params_int.push_back(px4_int("EKF2_AID_MASK", EKF_GPS_));
-  } else if (odometry_state_ == odometry_state_t::hector) {
+  } else if (switching_state_ == odometry_state_t::hector) {
     px4_params_int.push_back(px4_int("EKF2_AID_MASK", EKF_HECTOR_));
+  } else {
+    assert(false);
+    RCLCPP_ERROR(get_logger(), "Invalid switching state, this should never happen!");
   }
   return uploadPx4Parameters(std::make_shared<fog_msgs::srv::SetPx4ParamInt::Request>(), px4_params_int, set_px4_param_int_);
 }
