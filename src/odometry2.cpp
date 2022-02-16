@@ -126,7 +126,7 @@ private:
   float gps_msg_interval_max_  = 0.0;
   float gps_msg_interval_warn_ = 0.0;
 
-  std::chrono::time_point<std::chrono::system_clock> gps_last_msg_time_ = std::chrono::system_clock::now(); // Last received message from gps
+  std::chrono::time_point<std::chrono::system_clock> gps_last_msg_time_ = std::chrono::system_clock::now();  // Last received message from gps
 
   // | -------------------- Hector parameters ------------------- |
   std::atomic_bool getting_hector_ = false;
@@ -549,7 +549,7 @@ void Odometry2::hectorPoseCallback(const geometry_msgs::msg::PoseStamped::Unique
     return;
   }
 
-  RCLCPP_INFO_ONCE(get_logger(), "Getting hector poses!");
+  RCLCPP_INFO_ONCE(get_logger(), "Hector: Getting hector poses!");
 
   std::scoped_lock lock(hector_raw_mutex_);
 
@@ -616,7 +616,7 @@ void Odometry2::gpsCallback(const px4_msgs::msg::VehicleGpsPosition::UniquePtr m
     return;
   }
 
-  RCLCPP_INFO_ONCE(get_logger(), "Getting Vehicle GPS!");
+  RCLCPP_INFO_ONCE(get_logger(), "GPS: Getting Vehicle GPS!");
 
   std::scoped_lock lock(gps_raw_mutex_);
 
@@ -710,11 +710,11 @@ bool Odometry2::resetHectorCallback([[maybe_unused]] const std::shared_ptr<std_s
   if (hector_state_ == estimator_state_t::restart || hector_state_ == estimator_state_t::not_reliable) {
     response->message = "Hector in reset mode";
     response->success = false;
-    RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 500, "[Odometry2]: Hector is already in reset mode.");
+    RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 500, "Hector is already in reset mode.");
     return true;
   }
 
-  RCLCPP_INFO(get_logger(), "[Odometry2]: Hector set to restart state.");
+  RCLCPP_INFO(get_logger(), "Hector set to restart state.");
 
   hector_state_ = estimator_state_t::not_reliable;
 
@@ -790,10 +790,10 @@ void Odometry2::update_odometry_state() {
 // odometry_mutex_
 void Odometry2::state_odometry_not_connected() {
 
-  RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000, "Odometry state: Waiting to initialize Pixhawk and Control Interface.");
+  RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000, "Odometry state: Waiting to initialize Pixhawk and Control Interface.");
 
   if (getting_pixhawk_odometry_ && getting_control_interface_diagnostics_) {
-    RCLCPP_INFO(get_logger(), "Pixhawk and Control Interface is ready");
+    RCLCPP_INFO(get_logger(), "Odometry state: Pixhawk and Control Interface is ready");
     odometry_state_ = odometry_state_t::init;
   }
 }
@@ -804,15 +804,15 @@ void Odometry2::state_odometry_not_connected() {
 // odometry_mutex_
 void Odometry2::state_odometry_init() {
 
-  RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000, "Odometry state: Initializing odometry module.");
+  RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000, "Odometry state: Initializing odometry module.");
 
   // Set and handle initial PX4 parameters setting
   if (!set_initial_px4_params_) {
-    RCLCPP_INFO(get_logger(), "Setting initial PX4 parameters.");
+    RCLCPP_INFO(get_logger(), "Odometry state: Setting initial PX4 parameters.");
     if (setInitialPx4Params()) {
       set_initial_px4_params_ = true;
     } else {
-      RCLCPP_WARN(get_logger(), "Fail to set all PX4 parameters. Will repeat in next cycle.");
+      RCLCPP_ERROR(get_logger(), "Odometry state: Fail to set all PX4 parameters. Will repeat in next cycle.");
       return;
     }
   }
@@ -821,6 +821,7 @@ void Odometry2::state_odometry_init() {
   if (static_tf_broadcaster_ == nullptr) {
     static_tf_broadcaster_ = std::make_shared<tf2_ros::StaticTransformBroadcaster>(this->shared_from_this());
     publishStaticTF();
+    RCLCPP_INFO(get_logger(), "Odometry state: Publishing static TF");
   }
 
   // Wait until gps estimator is ready. GPS is required to initalize hector
@@ -830,7 +831,7 @@ void Odometry2::state_odometry_init() {
     odometry_state_ = odometry_state_t::gps;
     return;
   } else {
-    RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000, "Odometry state: Waiting for GPS estimator.");
+    RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000, "Odometry state: Waiting for reliable GPS estimator.");
     return;
   }
 }
@@ -963,12 +964,13 @@ void Odometry2::update_gps_state() {
 // gps_mutex_
 void Odometry2::state_gps_init() {
 
-  RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000, "GPS state: Initializing.");
+  RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000, "GPS state: Initializing.");
 
   if (getting_pixhawk_odometry_ && getting_gps_) {
-    RCLCPP_INFO(get_logger(), "GPS and pixhawk odometry received");
+    RCLCPP_INFO(get_logger(), "GPS state: GPS and pixhawk odometry received");
   } else {
-    RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000, "Waiting to receive GPS and odometry from Pixhawk.");
+    RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000, "GPS state: Waiting to receive GPS and odometry from Pixhawk.");
+    return;
   }
 
   // Check if the estimator should be active
@@ -1105,8 +1107,17 @@ void Odometry2::update_hector_state() {
 // hector_mutex_
 void Odometry2::state_hector_init() {
 
+  RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000, "Hector state: Initializing");
+
+
   if (!getting_hector_) {
-    RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000, "Hector state: Initializing - waiting to receive hector data.");
+    RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000, "Hector state: Waiting to receive hector data.");
+    return;
+  }
+
+  std::string temp;
+  if (!tf_buffer_->canTransform(fcu_frame_, local_origin_frame_, rclcpp::Time(0), std::chrono::duration<double>(0), &temp)) {
+    RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000, "Hector state: Missing TF between ned_origin and frd_fcu frame from GPS.");
     return;
   }
 
@@ -1211,11 +1222,10 @@ void Odometry2::state_hector_not_reliable() {
   // Check the last hector reset time
   std::chrono::duration<double> dt = std::chrono::system_clock::now() - hector_reset_called_time_;
   if (dt.count() > hector_reset_wait_) {
-    RCLCPP_INFO(get_logger(), "[Odometry2]: Hector reset");
+    RCLCPP_INFO(get_logger(), "Hector state: State change to reset");
     hector_state_ = estimator_state_t::restart;
   } else {
-    RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000, "[Odometry2]: Waiting for next hector reset availability. Call again in dt: %f",
-                         hector_reset_wait_ - dt.count());
+    RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000, "Waiting for next hector reset availability. Call again in dt: %f", hector_reset_wait_ - dt.count());
   }
 }
 //}
@@ -1283,9 +1293,9 @@ bool Odometry2::checkHectorReliability() {
   std::chrono::duration<double> dt = std::chrono::system_clock::now() - hector_last_msg_time_;
 
   if (dt.count() > hector_msg_interval_warn_) {
-    RCLCPP_WARN(get_logger(), "[Odometry2]: Hector pose not received for %f seconds.", dt.count());
+    RCLCPP_WARN(get_logger(), "Hector pose not received for %f seconds.", dt.count());
     if (dt.count() > hector_msg_interval_max_) {
-      RCLCPP_WARN(get_logger(), "[Odometry2]: Hector pose not received for %f seconds. Not reliable.", dt.count());
+      RCLCPP_WARN(get_logger(), "Hector pose not received for %f seconds. Not reliable.", dt.count());
       return false;
     }
   }
@@ -1294,23 +1304,23 @@ bool Odometry2::checkHectorReliability() {
   // Detect position jump in consecutive hector poses//{
   if (std::pow(hector_position_raw_[0] - hector_position_raw_prev_[0], 2) > hector_max_position_jump_ ||
       std::pow(hector_position_raw_[1] - hector_position_raw_prev_[1], 2) > hector_max_position_jump_) {
-    RCLCPP_WARN(get_logger(), "[Odometry2]: Jump detected in Hector Slam pose. orig_x: %f, orig_y: %f, x: %f, y: %f . Not reliable",
-                hector_position_raw_prev_[0], hector_position_raw_prev_[1], hector_position_raw_[0], hector_position_raw_[1]);
+    RCLCPP_WARN(get_logger(), "Jump detected in Hector Slam pose. orig_x: %f, orig_y: %f, x: %f, y: %f . Not reliable", hector_position_raw_prev_[0],
+                hector_position_raw_prev_[1], hector_position_raw_[0], hector_position_raw_[1]);
     return false;
   }
   /*//}*/
 
   // No update in consecutive hector poses -> no features//{
   if (std::pow(hector_position_raw_[0] - hector_position_raw_prev_[0], 2) == 0 && std::pow(hector_position_raw_[1] - hector_position_raw_prev_[1], 2) == 0) {
-    RCLCPP_WARN(get_logger(), "[Odometry2]: Hector does not have any features. orig_x: %f, orig_y: %f, x: %f, y: %f . Not reliable",
-                hector_position_raw_prev_[0], hector_position_raw_prev_[1], hector_position_raw_[0], hector_position_raw_[1]);
+    RCLCPP_WARN(get_logger(), "Hector does not have any features. orig_x: %f, orig_y: %f, x: %f, y: %f . Not reliable", hector_position_raw_prev_[0],
+                hector_position_raw_prev_[1], hector_position_raw_[0], hector_position_raw_[1]);
     return false;
   }
   /*//}*/
 
   // Detect velocity jump in consecutive hector poses//{
   if (hector_velocity_[0] > hector_max_velocity_ || hector_velocity_[1] > hector_max_velocity_) {
-    RCLCPP_WARN(get_logger(), "[Odometry2]: Hector velocity too large - x: %f, y: %f. Not reliable.", hector_velocity_[0], hector_velocity_[1]);
+    RCLCPP_WARN(get_logger(), "Hector velocity too large - x: %f, y: %f. Not reliable.", hector_velocity_[0], hector_velocity_[1]);
     return false;
   } /*//}*/
 
@@ -1327,9 +1337,9 @@ bool Odometry2::checkGpsReliability() {
   std::chrono::duration<double> dt = std::chrono::system_clock::now() - gps_last_msg_time_;
 
   if (dt.count() > gps_msg_interval_warn_) {
-    RCLCPP_WARN(get_logger(), "[Odometry2]: GPS message not received for %f seconds.", dt.count());
+    RCLCPP_WARN(get_logger(), "GPS message not received for %f seconds.", dt.count());
     if (dt.count() > gps_msg_interval_max_) {
-      RCLCPP_WARN(get_logger(), "[Odometry2]: GPS message not received for %f seconds. Not reliable.", dt.count());
+      RCLCPP_WARN(get_logger(), "GPS message not received for %f seconds. Not reliable.", dt.count());
       gps_eph_ = std::numeric_limits<float>::max();  // Set value to max in case GPS stop publishing
       return false;
     }
@@ -1519,13 +1529,12 @@ void Odometry2::publishHectorOdometry() {
 
   std::scoped_lock lock(px4_pose_mutex_, timestamp_mutex_);
 
-  RCLCPP_INFO(get_logger(), "Test 1");
-  if (!tf_buffer_->canTransform(ned_origin_frame_, hector_origin_frame_, rclcpp::Time(0))) {
+  std::string temp;
+  if (!tf_buffer_->canTransform(ned_origin_frame_, hector_origin_frame_, rclcpp::Time(0), std::chrono::duration<double>(0), &temp)) {
     RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000, "Missing hector origin frame - waiting for hector initialization.");
     return;
   }
 
-  RCLCPP_INFO(get_logger(), "Test 2");
   auto transform_stamped = tf_buffer_->lookupTransform(ned_origin_frame_, hector_origin_frame_, rclcpp::Time(0));
 
   // Transform pose, orientation and velocity
