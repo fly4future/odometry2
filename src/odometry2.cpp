@@ -204,6 +204,7 @@ private:
   rclcpp::Client<fog_msgs::srv::SetPx4ParamInt>::SharedPtr   set_px4_param_int_;
   rclcpp::Client<fog_msgs::srv::SetPx4ParamFloat>::SharedPtr set_px4_param_float_;
   rclcpp::Client<std_srvs::srv::Trigger>::SharedPtr          reset_hector_client_;
+  rclcpp::Client<std_srvs::srv::Trigger>::SharedPtr          land_client_;
 
   // | ------------------ Subscriber callbacks ------------------ |
   void pixhawkOdomCallback(const px4_msgs::msg::VehicleOdometry::UniquePtr msg);
@@ -238,9 +239,8 @@ private:
 
   // | ------------------ Odometry node routine ----------------- |
   std::recursive_mutex odometry_mutex_;
-  odometry_state_t     odometry_state_      = odometry_state_t::not_connected;
-  odometry_state_t     switching_state_     = odometry_state_t::init;  // State indicating the targeting switch state
-  std::atomic_bool     odometry_update_ekf_ = false;
+  odometry_state_t     odometry_state_  = odometry_state_t::not_connected;
+  odometry_state_t     switching_state_ = odometry_state_t::init;  // State indicating the targeting switch state
   double               odometry_loop_rate_;
 
   rclcpp::TimerBase::SharedPtr odometry_timer_;
@@ -479,6 +479,7 @@ Odometry2::Odometry2(rclcpp::NodeOptions options) : Node("odometry2", options) {
   set_px4_param_int_   = this->create_client<fog_msgs::srv::SetPx4ParamInt>("~/set_px4_param_int");
   set_px4_param_float_ = this->create_client<fog_msgs::srv::SetPx4ParamFloat>("~/set_px4_param_float");
   reset_hector_client_ = this->create_client<std_srvs::srv::Trigger>("~/reset_hector_service_out");
+  land_client_         = this->create_client<std_srvs::srv::Trigger>("~/land_service_out");
 
   // | -------------------- Service handlers -------------------- |
   const auto qos_profile  = qos.get_rmw_qos_profile();
@@ -707,6 +708,7 @@ bool Odometry2::resetHectorCallback([[maybe_unused]] const std::shared_ptr<std_s
 
   std::scoped_lock lock(hector_mutex_);
 
+  // Check if hector might be already in reset mode
   if (hector_state_ == estimator_state_t::restart || hector_state_ == estimator_state_t::not_reliable) {
     response->message = "Hector in reset mode";
     response->success = false;
@@ -714,9 +716,8 @@ bool Odometry2::resetHectorCallback([[maybe_unused]] const std::shared_ptr<std_s
     return true;
   }
 
-  RCLCPP_WARN(get_logger(), "Hector state: Hector set to restart.");
-
   hector_state_ = estimator_state_t::not_reliable;
+  RCLCPP_WARN(get_logger(), "Hector state: Service set hector to the restart.");
 
   response->message = "Hector set to restart.";
   response->success = true;
@@ -844,17 +845,20 @@ void Odometry2::state_odometry_switching() {
 
   RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000, "Odometry state: Switching state");
 
+  // Call land if missing odometry
+  if (switching_state_ == odometry_state_t::missing_odometry) {
+    odometry_state_ = odometry_state_t::missing_odometry;
+    return;
+  }
+
   // Update EKF parameters for the new estimator
-  if (odometry_update_ekf_) {
-    if (updateEkfParameters()) {
-      // Update successfull
-      odometry_update_ekf_ = false;
-      odometry_state_      = switching_state_;
-      return;
-    } else {
-      // If update fail, repeat
-      RCLCPP_WARN(get_logger(), "Fail to set all PX4 parameters for new estimator. Repeat in next cycle.");
-    }
+  if (updateEkfParameters()) {
+    // Update successfull
+    odometry_state_ = switching_state_;
+    return;
+  } else {
+    // If update fail, repeat
+    RCLCPP_WARN(get_logger(), "Fail to set all PX4 parameters for new estimator. Repeat in next cycle.");
   }
 }
 //}
@@ -886,9 +890,6 @@ void Odometry2::state_odometry_hector() {
   if (!checkEstimatorReliability()) {
     return;
   }
-
-
-  // CALL LAND IF REQUIRED BY THE RULES OR FORCE HOVER UNTIL ODOMETRY RELIABLE ENOUGH
 }
 //}
 
@@ -897,9 +898,18 @@ void Odometry2::state_odometry_hector() {
 // odometry_mutex_
 void Odometry2::state_odometry_missing_odometry() {
 
-  RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000, "Odometry state: Missing odometry");
+  RCLCPP_ERROR_THROTTLE(get_logger(), *get_clock(), 1000, "Odometry state: Missing odometry");
 
-  // CALL LAND IF REQUIRED BY THE RULES OR FORCE HOVER UNTIL ODOMETRY RELIABLE ENOUGH
+  // Call land via control_interface package
+  auto future_response = land_client_->async_send_request(std::make_shared<std_srvs::srv::Trigger::Request>());
+  RCLCPP_WARN(get_logger(), "Odometry state: Land called.");
+  if (future_response.wait_for(std::chrono::seconds(1)) == std::future_status::timeout || future_response.get() == nullptr) {
+    RCLCPP_ERROR(get_logger(), "Odometry state: Did not receive land response for 1 second, try again.");
+    return;
+  } else {
+    RCLCPP_INFO(get_logger(), "Odometry state: Land call successfull.");
+    //TODO: What now switch to land state? Would it be possible to take off later on again if reliable again? Or not at all?
+  }
 }
 //}
 
@@ -1225,7 +1235,8 @@ void Odometry2::state_hector_not_reliable() {
     RCLCPP_INFO(get_logger(), "Hector state: State change to restart.");
     hector_state_ = estimator_state_t::restart;
   } else {
-    RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000, "Hector state: Waiting for next hector reset availability. Call again in dt: %f", hector_reset_wait_ - dt.count());
+    RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000, "Hector state: Waiting for next hector reset availability. Call again in dt: %f",
+                         hector_reset_wait_ - dt.count());
   }
 }
 //}
@@ -1703,9 +1714,8 @@ bool Odometry2::checkEstimatorReliability() {
   }
 
   // Check if odometry state is planned to change
-  if (prev_state != switching_state_ && switching_state_ != odometry_state_t::missing_odometry) {
-    odometry_update_ekf_ = true;
-    odometry_state_      = odometry_state_t::switching;
+  if (prev_state != switching_state_) {
+    odometry_state_ = odometry_state_t::switching;
     return false;
   }
   return true;

@@ -44,7 +44,7 @@ def generate_launch_description():
                     # publishers
                     ("~/local_odom_out", "~/local_odom"),
                     ("~/local_hector_out", "~/local_hector"),
-                    ("~/hector_odometry_out", "/" + DRONE_DEVICE_ID + "/VehicleVisualOdometry_PubSubTopic"),
+                    ("~/hector_odometry_out", "/" + DRONE_DEVICE_ID + "/fmu/vehicle_visual_odometry/in"),
                     ("~/pixhawk_hector_out", "~/pixhawk_hector"),
                     ("~/odometry_diagnostics_out", "~/odometry_diagnostics"),
                     ("~/gps_diagnostics_out", "~/gps_diagnostics"),
@@ -62,6 +62,7 @@ def generate_launch_description():
                     ("~/set_px4_param_int", "/" + DRONE_DEVICE_ID + "/control_interface/set_px4_param_int"),
                     ("~/set_px4_param_float", "/" + DRONE_DEVICE_ID + "/control_interface/set_px4_param_float"),
                     ("~/reset_hector_service_out", "/" + DRONE_DEVICE_ID + "/hector_mapping/reset_hector"),
+                    ("~/land_service_out", "/" + DRONE_DEVICE_ID + "/control_interface/land"),
                 ],
             ),
         ],
