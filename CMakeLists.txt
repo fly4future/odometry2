@@ -35,6 +35,7 @@ include_directories(
 add_library(odometry2 SHARED
   src/odometry2.cpp
   src/lateral_estimator.cpp
+  src/altitude_estimator.cpp
   )
 
 ament_target_dependencies(odometry2

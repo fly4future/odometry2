@@ -20,6 +20,7 @@ enum struct odometry_state_t
   gps,
   hector,
   missing_odometry,
+  landed,
 };
 
 
@@ -37,6 +38,8 @@ static inline odometry_state_t to_enum(const fog_msgs::msg::OdometryState msg) {
       return odometry_state_t::hector;
     case fog_msgs::msg::OdometryState::MISSING_ODOMETRY:
       return odometry_state_t::missing_odometry;
+    case fog_msgs::msg::OdometryState::LANDED:
+      return odometry_state_t::landed;
     default:
       assert(false && ODOM_ERR_MSG);
       return odometry_state_t::invalid;
@@ -64,6 +67,9 @@ static inline fog_msgs::msg::OdometryState to_msg(const odometry_state_t enum_va
     case odometry_state_t::missing_odometry:
       msg.state = fog_msgs::msg::OdometryState::MISSING_ODOMETRY;
       break;
+    case odometry_state_t::landed:
+      msg.state = fog_msgs::msg::OdometryState::LANDED;
+      break;
     default:
       assert(false && ODOM_ERR_MSG);
       msg.state = fog_msgs::msg::OdometryState::INVALID;
@@ -86,6 +92,8 @@ static inline std::string to_string(const odometry_state_t enum_val) {
       return "hector";
     case odometry_state_t::missing_odometry:
       return "missing_odometry";
+    case odometry_state_t::landed:
+      return "landed";
     default:
       assert(false && ODOM_ERR_MSG);
       return "invalid";

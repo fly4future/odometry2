@@ -1,105 +1,99 @@
 <?xml version='1.0' encoding='UTF-8'?>
-<root version="2.3.8">
+<root>
  <tabbed_widget name="Main Window" parent="main_window">
-  <Tab tab_name="Position" containers="1">
+  <Tab containers="1" tab_name="Position">
    <Container>
-    <DockSplitter orientation="-" sizes="0.333684;0.332632;0.333684" count="3">
+    <DockSplitter orientation="-" count="3" sizes="0.333684;0.332632;0.333684">
      <DockArea name="Normal X">
-      <plot mode="TimeSeries" style="Lines">
-       <range bottom="1.958228" top="2.041797" left="6.996155" right="16.996138"/>
+      <plot style="Lines" mode="TimeSeries">
+       <range top="2.040954" left="80.977374" bottom="1.991746" right="92.527690"/>
        <limitY/>
-       <curve name="/ssrc_fog_x/VehicleLocalPosition_PubSubTopic/y" color="#0500ff"/>
-       <curve name="/ssrc_fog_x/groundtruth/pose/pose/position/x" color="#ff0018"/>
+       <curve color="#ff0000" name="/ssrc_fog_x/fmu/vehicle_local_position/out/y"/>
+       <curve color="#00fa16" name="/ssrc_fog_x/fmu/vehicle_visual_odometry/in/y"/>
       </plot>
      </DockArea>
      <DockArea name="Normal Y">
-      <plot mode="TimeSeries" style="Lines">
-       <range bottom="-3.054992" top="-2.975987" left="6.996155" right="16.996138"/>
+      <plot style="Lines" mode="TimeSeries">
+       <range top="-2.968859" left="80.977374" bottom="-3.014352" right="92.527690"/>
        <limitY/>
-       <curve name="/ssrc_fog_x/VehicleLocalPosition_PubSubTopic/x" color="#0000ff"/>
-       <curve name="/ssrc_fog_x/groundtruth/pose/pose/position/y" color="#ff0001"/>
+       <curve color="#ff0001" name="/ssrc_fog_x/fmu/vehicle_local_position/out/x"/>
+       <curve color="#20ff00" name="/ssrc_fog_x/fmu/vehicle_visual_odometry/in/x"/>
       </plot>
      </DockArea>
      <DockArea name="Down Z">
-      <plot mode="TimeSeries" style="Lines">
-       <range bottom="-1.618844" top="-0.975931" left="6.996155" right="17.000067"/>
+      <plot style="Lines" mode="TimeSeries">
+       <range top="-1.978428" left="80.973003" bottom="-2.256624" right="92.527690"/>
        <limitY/>
-       <curve name="/ssrc_fog_x/VehicleLocalPosition_PubSubTopic/z" color="#0e00ff"/>
-       <curve name="/ssrc_fog_x/DistanceSensor_PubSubTopic/current_distance" color="#00ff38">
-        <transform name="Scale/Offset" alias="/ssrc_fog_x/DistanceSensor_PubSubTopic/current_distance[Scale/Offset]">
+       <curve color="#ff0700" name="/ssrc_fog_x/fmu/vehicle_local_position/out/z"/>
+       <curve color="#ff9b0e" name="/ssrc_fog_x/fmu/distance_sensor/out/current_distance">
+        <transform alias="/ssrc_fog_x/fmu/distance_sensor/out/current_distance[Scale/Offset]" name="Scale/Offset">
          <options time_offset="0" value_offset="0" value_scale="-1.0"/>
         </transform>
        </curve>
-       <curve name="/ssrc_fog_x/groundtruth/pose/pose/position/z" color="#f14cc1">
-        <transform name="Scale/Offset" alias="/ssrc_fog_x/groundtruth/pose/pose/position/z[Scale/Offset]">
-         <options time_offset="0" value_offset="0" value_scale="-1.0"/>
-        </transform>
-       </curve>
+       <curve color="#03ff00" name="/ssrc_fog_x/fmu/vehicle_visual_odometry/in/z"/>
       </plot>
      </DockArea>
     </DockSplitter>
    </Container>
   </Tab>
-  <Tab tab_name="Speed" containers="1">
+  <Tab containers="1" tab_name="Speed">
    <Container>
-    <DockSplitter orientation="-" sizes="0.333684;0.332632;0.333684" count="3">
+    <DockSplitter orientation="-" count="3" sizes="0.35;0.35;0.3">
      <DockArea name="...">
-      <plot mode="TimeSeries" style="Lines">
-       <range bottom="-0.024451" top="0.021883" left="3.876106" right="13.879212"/>
+      <plot style="Lines" mode="TimeSeries">
+       <range top="0.025358" left="0.000275" bottom="-0.031886" right="1.005876"/>
        <limitY/>
-       <curve name="/ssrc_fog_x/VehicleLocalPosition_PubSubTopic/vx" color="#1900ff"/>
-       <curve name="/ssrc_fog_x/odometry2/pixhawk_hector/twist/twist/linear/x" color="#1dff00"/>
-       <curve name="/ssrc_fog_x/groundtruth/twist/twist/linear/y" color="#fb0e00"/>
+       <curve color="#ff0300" name="/ssrc_fog_x/fmu/vehicle_local_position/out/vx"/>
+       <curve color="#0019ff" name="/ssrc_fog_x/odometry/pixhawk_hector/twist/twist/linear/x"/>
       </plot>
      </DockArea>
      <DockArea name="...">
-      <plot mode="TimeSeries" style="Lines">
-       <range bottom="-0.006353" top="0.020572" left="3.876106" right="13.879212"/>
+      <plot style="Lines" mode="TimeSeries">
+       <range top="0.034200" left="0.000275" bottom="-0.011428" right="1.005876"/>
        <limitY/>
-       <curve name="/ssrc_fog_x/VehicleLocalPosition_PubSubTopic/vy" color="#0e3dff"/>
-       <curve name="/ssrc_fog_x/groundtruth/twist/twist/linear/x" color="#ff0000"/>
+       <curve color="#ff0000" name="/ssrc_fog_x/fmu/vehicle_local_position/out/vy"/>
+       <curve color="#0017ff" name="/ssrc_fog_x/odometry/pixhawk_hector/twist/twist/linear/y"/>
       </plot>
      </DockArea>
      <DockArea name="...">
-      <plot mode="TimeSeries" style="Lines">
-       <range bottom="-0.030573" top="0.053427" left="3.876106" right="13.879212"/>
+      <plot style="Lines" mode="TimeSeries">
+       <range top="0.093615" left="0.000275" bottom="0.016113" right="1.005876"/>
        <limitY/>
-       <curve name="/ssrc_fog_x/VehicleLocalPosition_PubSubTopic/vz" color="#1400ef"/>
-       <curve name="/ssrc_fog_x/groundtruth/twist/twist/linear/z" color="#ff0003"/>
+       <curve color="#ff0300" name="/ssrc_fog_x/fmu/vehicle_local_position/out/vz"/>
       </plot>
      </DockArea>
     </DockSplitter>
    </Container>
   </Tab>
-  <Tab tab_name="Orientation" containers="1">
+  <Tab containers="1" tab_name="Orientation">
    <Container>
-    <DockSplitter orientation="-" sizes="0.249737;0.25079;0.249737;0.249737" count="4">
+    <DockSplitter orientation="-" count="4" sizes="0.25;0.25;0.25;0.25">
      <DockArea name="...">
-      <plot mode="TimeSeries" style="Lines">
-       <range bottom="0.707156" top="0.707391" left="3.192561" right="13.187141"/>
+      <plot style="Lines" mode="TimeSeries">
+       <range top="0.100000" left="0.000000" bottom="-0.100000" right="0.000000"/>
        <limitY/>
-       <curve name="/ssrc_fog_x/VehicleOdometry_PubSubTopic/q.0" color="#0d00e8"/>
+       <curve color="#0d00e8" name="/ssrc_fog_x/VehicleOdometry_PubSubTopic/q.0"/>
       </plot>
      </DockArea>
      <DockArea name="...">
-      <plot mode="TimeSeries" style="Lines">
-       <range bottom="0.001166" top="0.002951" left="3.192561" right="13.187141"/>
+      <plot style="Lines" mode="TimeSeries">
+       <range top="0.100000" left="0.000000" bottom="-0.100000" right="0.000000"/>
        <limitY/>
-       <curve name="/ssrc_fog_x/VehicleOdometry_PubSubTopic/q.1" color="#0009ff"/>
+       <curve color="#0009ff" name="/ssrc_fog_x/VehicleOdometry_PubSubTopic/q.1"/>
       </plot>
      </DockArea>
      <DockArea name="...">
-      <plot mode="TimeSeries" style="Lines">
-       <range bottom="-0.003808" top="-0.002224" left="3.192561" right="13.187141"/>
+      <plot style="Lines" mode="TimeSeries">
+       <range top="0.100000" left="0.000000" bottom="-0.100000" right="0.000000"/>
        <limitY/>
-       <curve name="/ssrc_fog_x/VehicleOdometry_PubSubTopic/q.2" color="#0015ff"/>
+       <curve color="#0015ff" name="/ssrc_fog_x/VehicleOdometry_PubSubTopic/q.2"/>
       </plot>
      </DockArea>
      <DockArea name="...">
-      <plot mode="TimeSeries" style="Lines">
-       <range bottom="0.706815" top="0.707051" left="3.192561" right="13.187141"/>
+      <plot style="Lines" mode="TimeSeries">
+       <range top="0.100000" left="0.000000" bottom="-0.100000" right="0.000000"/>
        <limitY/>
-       <curve name="/ssrc_fog_x/VehicleOdometry_PubSubTopic/q.3" color="#0017ff"/>
+       <curve color="#0017ff" name="/ssrc_fog_x/VehicleOdometry_PubSubTopic/q.3"/>
       </plot>
      </DockArea>
     </DockSplitter>
@@ -112,7 +106,7 @@
  <!-- - - - - - - - - - - - - - - -->
  <Plugins>
   <plugin ID="DataLoad CSV">
-   <default time_axis=""/>
+   <default time_axis="" delimiter="0"/>
   </plugin>
   <plugin ID="DataLoad ROS2 bags">
    <use_header_stamp value="false"/>
@@ -125,17 +119,18 @@
    <discard_large_arrays value="false"/>
    <max_array_size value="true"/>
    <selected_topics>
-    <topic name="/ssrc_fog_x/DistanceSensor_PubSubTopic"/>
-    <topic name="/ssrc_fog_x/VehicleLocalPosition_PubSubTopic"/>
-    <topic name="/ssrc_fog_x/VehicleOdometry_PubSubTopic"/>
-    <topic name="/ssrc_fog_x/garmin/range"/>
-    <topic name="/ssrc_fog_x/groundtruth"/>
-    <topic name="/ssrc_fog_x/odometry2/local_odom"/>
+    <topic name="/ssrc_fog_x/fmu/distance_sensor/out"/>
+    <topic name="/ssrc_fog_x/fmu/timesync/in"/>
+    <topic name="/ssrc_fog_x/fmu/timesync/out"/>
+    <topic name="/ssrc_fog_x/fmu/vehicle_local_position/out"/>
+    <topic name="/ssrc_fog_x/fmu/vehicle_odometry/out"/>
+    <topic name="/ssrc_fog_x/fmu/vehicle_visual_odometry/in"/>
+    <topic name="/ssrc_fog_x/odometry/pixhawk_hector"/>
+    <topic name="/ssrc_fog_x/timesync_status"/>
    </selected_topics>
   </plugin>
   <plugin ID="UDP Server"/>
   <plugin ID="WebSocket Server"/>
-  <plugin ID="ZMQ Subscriber"/>
   <plugin status="idle" ID="CSV Exporter"/>
   <plugin status="idle" ID="ROS2 Topic Re-Publisher"/>
  </Plugins>
