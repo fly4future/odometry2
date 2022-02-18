@@ -49,11 +49,6 @@
 typedef std::tuple<std::string, int>   px4_int;
 typedef std::tuple<std::string, float> px4_float;
 
-// PX parameters
-#define EKF_GPS_ 1
-#define EKF_HECTOR_ 328
-#define EKF_HECTOR_HEIGHT_ 3
-
 using namespace std::placeholders;
 using namespace fog_lib;
 
@@ -92,8 +87,10 @@ private:
   std::atomic_bool                                     publishing_static_tf_ = false;
 
   // | ---------------------- PX parameters --------------------- |
-  std::vector<px4_int>   px4_params_int_;
-  std::vector<px4_float> px4_params_float_;
+  std::vector<px4_int>   hector_px4_params_int_;
+  std::vector<px4_float> hector_px4_params_float_;
+  std::vector<px4_int>   gps_px4_params_int_;
+  std::vector<px4_float> gps_px4_params_float_;
   std::atomic_bool       set_initial_px4_params_                = false;
   std::atomic_bool       getting_px4_utm_position_              = false;
   std::atomic_bool       getting_control_interface_diagnostics_ = false;
@@ -104,9 +101,7 @@ private:
   float      px4_orientation_[4];
   std::mutex px4_pose_mutex_;
 
-  // | -------------------- PX EKF parameters ------------------- |
   int ekf_default_hgt_mode_ = 0;
-  int ekf_default_mask_     = 0;
 
   // | -------------------- PX home position -------------------- |
   double           px4_utm_position_[2];
@@ -130,7 +125,8 @@ private:
   float gps_msg_interval_max_  = 0.0;
   float gps_msg_interval_warn_ = 0.0;
 
-  std::chrono::time_point<std::chrono::system_clock> gps_last_msg_time_ = std::chrono::system_clock::now();  // Last received message from gps
+  std::chrono::time_point<std::chrono::system_clock> gps_last_msg_time_           = std::chrono::system_clock::now();  // Last received message from gps
+  std::chrono::time_point<std::chrono::system_clock> gps_last_processed_msg_time_ = std::chrono::system_clock::now();
 
   // | -------------------- Hector parameters ------------------- |
   std::atomic_bool getting_hector_ = false;
@@ -139,8 +135,6 @@ private:
 
   int    c_hector_init_msgs_         = 0;
   int    hector_num_init_msgs_       = 0;
-  int    hector_default_ekf_mask_    = 0;
-  int    hector_default_hgt_mode_    = 0;
   int    hector_reset_response_wait_ = 0;
   float  hector_msg_interval_max_    = 0.0;
   float  hector_msg_interval_warn_   = 0.0;
@@ -332,7 +326,7 @@ private:
   rclcpp::CallbackGroup::SharedPtr callback_group_;
 
   // | --------------------- Utils function --------------------- |
-  bool setInitialPx4Params();
+  bool setPx4Params(const std::vector<px4_int>& params_int, const std::vector<px4_float>& params_float);
   bool updateEkfParameters();
   bool checkEstimatorReliability();
 
@@ -395,40 +389,69 @@ Odometry2::Odometry2(rclcpp::NodeOptions options) : Node("odometry2", options) {
   int   param_int;
   float param_float;
 
-  loaded_successfully &= parse_param("px4.EKF2_AID_MASK", ekf_default_mask_, *this);
-  px4_params_int_.push_back(px4_int("EKF2_AID_MASK", ekf_default_mask_));
-  //TODO: Add only GPS (1) at the beginning and also other px4 parameters. Change them according to active estimator
-  loaded_successfully &= parse_param("px4.EKF2_EV_NOISE_MD", param_int, *this);
-  px4_params_int_.push_back(px4_int("EKF2_EV_NOISE_MD", param_int));
-  loaded_successfully &= parse_param("px4.EKF2_RNG_AID", param_int, *this);
-  px4_params_int_.push_back(px4_int("EKF2_RNG_AID", param_int));
-  loaded_successfully &= parse_param("px4.EKF2_HGT_MODE", hector_default_hgt_mode_, *this);
-  px4_params_int_.push_back(px4_int("EKF2_HGT_MODE", hector_default_hgt_mode_));
+  /*Hector px params loading//{*/
+  loaded_successfully &= parse_param("px4.hector.EKF2_AID_MASK", param_int, *this);
+  hector_px4_params_int_.push_back(px4_int("EKF2_AID_MASK", param_int));
+  loaded_successfully &= parse_param("px4.hector.EKF2_EV_NOISE_MD", param_int, *this);
+  hector_px4_params_int_.push_back(px4_int("EKF2_EV_NOISE_MD", param_int));
+  loaded_successfully &= parse_param("px4.hector.EKF2_RNG_AID", param_int, *this);
+  hector_px4_params_int_.push_back(px4_int("EKF2_RNG_AID", param_int));
+  loaded_successfully &= parse_param("px4.hector.EKF2_HGT_MODE", param_int, *this);
+  hector_px4_params_int_.push_back(px4_int("EKF2_HGT_MODE", param_int));
 
-  loaded_successfully &= parse_param("px4.EKF2_EV_DELAY", param_float, *this);
-  px4_params_float_.push_back(px4_float("EKF2_EV_DELAY", param_float));
-  loaded_successfully &= parse_param("px4.EKF2_EVP_NOISE", param_float, *this);
-  px4_params_float_.push_back(px4_float("EKF2_EVP_NOISE", param_float));
-  loaded_successfully &= parse_param("px4.EKF2_EVV_NOISE", param_float, *this);
-  px4_params_float_.push_back(px4_float("EKF2_EVV_NOISE", param_float));
-  loaded_successfully &= parse_param("px4.EKF2_RNG_A_HMAX", param_float, *this);
-  px4_params_float_.push_back(px4_float("EKF2_RNG_A_HMAX", param_float));
-  loaded_successfully &= parse_param("px4.MPC_XY_CRUISE", param_float, *this);
-  px4_params_float_.push_back(px4_float("MPC_XY_CRUISE", param_float));
-  loaded_successfully &= parse_param("px4.MC_YAWRATE_MAX", param_float, *this);
-  px4_params_float_.push_back(px4_float("MC_YAWRATE_MAX", param_float));
-  loaded_successfully &= parse_param("px4.MPC_ACC_HOR", param_float, *this);
-  px4_params_float_.push_back(px4_float("MPC_ACC_HOR", param_float));
-  loaded_successfully &= parse_param("px4.MPC_ACC_HOR_MAX", param_float, *this);
-  px4_params_float_.push_back(px4_float("MPC_ACC_HOR_MAX", param_float));
-  loaded_successfully &= parse_param("px4.MPC_JERK_AUTO", param_float, *this);
-  px4_params_float_.push_back(px4_float("MPC_JERK_AUTO", param_float));
-  loaded_successfully &= parse_param("px4.MPC_JERK_MAX", param_float, *this);
-  px4_params_float_.push_back(px4_float("MPC_JERK_MAX", param_float));
-  loaded_successfully &= parse_param("px4.MPC_ACC_DOWN_MAX", param_float, *this);
-  px4_params_float_.push_back(px4_float("MPC_ACC_DOWN_MAX", param_float));
-  loaded_successfully &= parse_param("px4.MPC_ACC_UP_MAX", param_float, *this);
-  px4_params_float_.push_back(px4_float("MPC_ACC_UP_MAX", param_float));
+  loaded_successfully &= parse_param("px4.hector.EKF2_EV_DELAY", param_float, *this);
+  hector_px4_params_float_.push_back(px4_float("EKF2_EV_DELAY", param_float));
+  loaded_successfully &= parse_param("px4.hector.EKF2_EVP_NOISE", param_float, *this);
+  hector_px4_params_float_.push_back(px4_float("EKF2_EVP_NOISE", param_float));
+  loaded_successfully &= parse_param("px4.hector.EKF2_EVV_NOISE", param_float, *this);
+  hector_px4_params_float_.push_back(px4_float("EKF2_EVV_NOISE", param_float));
+  loaded_successfully &= parse_param("px4.hector.EKF2_RNG_A_HMAX", param_float, *this);
+  hector_px4_params_float_.push_back(px4_float("EKF2_RNG_A_HMAX", param_float));
+  loaded_successfully &= parse_param("px4.hector.MPC_XY_CRUISE", param_float, *this);
+  hector_px4_params_float_.push_back(px4_float("MPC_XY_CRUISE", param_float));
+  loaded_successfully &= parse_param("px4.hector.MC_YAWRATE_MAX", param_float, *this);
+  hector_px4_params_float_.push_back(px4_float("MC_YAWRATE_MAX", param_float));
+  loaded_successfully &= parse_param("px4.hector.MPC_ACC_HOR", param_float, *this);
+  hector_px4_params_float_.push_back(px4_float("MPC_ACC_HOR", param_float));
+  loaded_successfully &= parse_param("px4.hector.MPC_ACC_HOR_MAX", param_float, *this);
+  hector_px4_params_float_.push_back(px4_float("MPC_ACC_HOR_MAX", param_float));
+  loaded_successfully &= parse_param("px4.hector.MPC_JERK_AUTO", param_float, *this);
+  hector_px4_params_float_.push_back(px4_float("MPC_JERK_AUTO", param_float));
+  loaded_successfully &= parse_param("px4.hector.MPC_JERK_MAX", param_float, *this);
+  hector_px4_params_float_.push_back(px4_float("MPC_JERK_MAX", param_float));
+  loaded_successfully &= parse_param("px4.hector.MPC_ACC_DOWN_MAX", param_float, *this);
+  hector_px4_params_float_.push_back(px4_float("MPC_ACC_DOWN_MAX", param_float));
+  loaded_successfully &= parse_param("px4.hector.MPC_ACC_UP_MAX", param_float, *this);
+  hector_px4_params_float_.push_back(px4_float("MPC_ACC_UP_MAX", param_float));
+  /*//}*/
+
+  /*GPS px params loading//{*/
+  loaded_successfully &= parse_param("px4.gps.EKF2_AID_MASK", param_int, *this);
+  gps_px4_params_int_.push_back(px4_int("EKF2_AID_MASK", param_int));
+  loaded_successfully &= parse_param("px4.gps.EKF2_RNG_AID", param_int, *this);
+  gps_px4_params_int_.push_back(px4_int("EKF2_RNG_AID", param_int));
+  loaded_successfully &= parse_param("px4.gps.EKF2_HGT_MODE", param_int, *this);
+  gps_px4_params_int_.push_back(px4_int("EKF2_HGT_MODE", param_int));
+
+  loaded_successfully &= parse_param("px4.gps.EKF2_RNG_A_HMAX", param_float, *this);
+  gps_px4_params_float_.push_back(px4_float("EKF2_RNG_A_HMAX", param_float));
+  loaded_successfully &= parse_param("px4.gps.MPC_XY_CRUISE", param_float, *this);
+  gps_px4_params_float_.push_back(px4_float("MPC_XY_CRUISE", param_float));
+  loaded_successfully &= parse_param("px4.gps.MC_YAWRATE_MAX", param_float, *this);
+  gps_px4_params_float_.push_back(px4_float("MC_YAWRATE_MAX", param_float));
+  loaded_successfully &= parse_param("px4.gps.MPC_ACC_HOR", param_float, *this);
+  gps_px4_params_float_.push_back(px4_float("MPC_ACC_HOR", param_float));
+  loaded_successfully &= parse_param("px4.gps.MPC_ACC_HOR_MAX", param_float, *this);
+  gps_px4_params_float_.push_back(px4_float("MPC_ACC_HOR_MAX", param_float));
+  loaded_successfully &= parse_param("px4.gps.MPC_JERK_AUTO", param_float, *this);
+  gps_px4_params_float_.push_back(px4_float("MPC_JERK_AUTO", param_float));
+  loaded_successfully &= parse_param("px4.gps.MPC_JERK_MAX", param_float, *this);
+  gps_px4_params_float_.push_back(px4_float("MPC_JERK_MAX", param_float));
+  loaded_successfully &= parse_param("px4.gps.MPC_ACC_DOWN_MAX", param_float, *this);
+  gps_px4_params_float_.push_back(px4_float("MPC_ACC_DOWN_MAX", param_float));
+  loaded_successfully &= parse_param("px4.gps.MPC_ACC_UP_MAX", param_float, *this);
+  gps_px4_params_float_.push_back(px4_float("MPC_ACC_UP_MAX", param_float));
+  /*//}*/
   //}
 
   // | -------------------- Frame definition -------------------- |
@@ -658,7 +681,7 @@ void Odometry2::hectorPoseCallback(const geometry_msgs::msg::PoseStamped::Unique
   /*Hector convergence//{*/
   // Wait for hector to converge
   if (c_hector_init_msgs_++ < hector_num_init_msgs_) {
-    RCLCPP_INFO(get_logger(), "Hector pose #%d - x: %f y: %f", c_hector_init_msgs_, msg->pose.position.x, msg->pose.position.y);
+    /* RCLCPP_INFO(get_logger(), "Hector pose #%d - x: %f y: %f", c_hector_init_msgs_, msg->pose.position.x, msg->pose.position.y); */
     hector_position_raw_[0] = msg->pose.position.x;
     hector_position_raw_[1] = msg->pose.position.y;
     return;
@@ -962,8 +985,8 @@ void Odometry2::state_odometry_init() {
 
   // Set and handle initial PX4 parameters setting
   if (!set_initial_px4_params_) {
-    RCLCPP_INFO(get_logger(), "Odometry state: Setting initial PX4 parameters.");
-    if (setInitialPx4Params()) {
+    RCLCPP_INFO(get_logger(), "Odometry state: Setting initial PX4 parameters for GPS.");
+    if (setPx4Params(gps_px4_params_int_, gps_px4_params_float_)) {
       set_initial_px4_params_ = true;
     } else {
       RCLCPP_ERROR(get_logger(), "Odometry state: Fail to set all PX4 parameters. Will repeat in next cycle.");
@@ -1162,10 +1185,14 @@ void Odometry2::state_gps_reliable() {
 
   std::scoped_lock lock(gps_raw_mutex_, px4_pose_mutex_);
 
-  // Check gps reliability
-  if (!checkGpsReliability()) {
-    gps_state_ = estimator_state_t::not_reliable;
-    return;
+  // Check if new GPS message has arrived
+  if (gps_last_processed_msg_time_ != gps_last_msg_time_) {
+    gps_last_processed_msg_time_ = gps_last_msg_time_;
+    // Check gps reliability
+    if (!checkGpsReliability()) {
+      gps_state_ = estimator_state_t::not_reliable;
+      return;
+    }
   }
 
   // Publish TFs and odometry
@@ -1181,22 +1208,37 @@ void Odometry2::state_gps_not_reliable() {
 
   RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000, "GPS state: Not reliable.");
 
-  // GPS quality is getting better
-  if (gps_eph_ < gps_eph_max_) {
-    if (c_gps_eph_good_++ >= gps_msg_good_) {
-
-      RCLCPP_WARN(get_logger(), "GPS quality is good! Reliable.");
-      c_gps_eph_good_ = 0;
-      gps_state_      = estimator_state_t::reliable;
+  // Check if new GPS message has arrived
+  if (gps_last_processed_msg_time_ != gps_last_msg_time_) {
+    gps_last_processed_msg_time_ = gps_last_msg_time_;
+    // Check gps reliability
+    if (checkGpsReliability()) {
+      gps_state_ = estimator_state_t::reliable;
       return;
-
-    } else {
-      RCLCPP_WARN(get_logger(), "GPS quality is improving! #%d EPH value: %f", c_gps_eph_good_, gps_eph_);
-      //TODO: Add variable to chek if new GPS measurement has arrived. Otherwise if one is good, it will finish right away
     }
-  } else {
-    c_gps_eph_good_ = 0;  // Reset the good message counter
   }
+
+  /*   // Check if new GPS message has arrived */
+  /*   if (gps_last_processed_msg_time_ == gps_last_msg_time_) { */
+  /*     return; */
+  /*   } */
+  /*   gps_last_processed_msg_time_ = gps_last_msg_time_; */
+
+  /*   // GPS quality is getting better */
+  /*   if (gps_eph_ < gps_eph_max_) { */
+  /*     if (c_gps_eph_good_++ >= gps_msg_good_) { */
+
+  /*       RCLCPP_WARN(get_logger(), "GPS quality is good! Reliable."); */
+  /*       c_gps_eph_good_ = 0; */
+  /*       gps_state_      = estimator_state_t::reliable; */
+  /*       return; */
+
+  /*     } else { */
+  /*       RCLCPP_WARN(get_logger(), "GPS quality is improving! #%d EPH value: %f", c_gps_eph_good_, gps_eph_); */
+  /*     } */
+  /*   } else { */
+  /*     c_gps_eph_good_ = 0;  // Reset the good message counter */
+  /*   } */
 }
 //}
 
@@ -1382,7 +1424,7 @@ void Odometry2::state_hector_reliable() {
   garmin_alt_estimator_->getState(0, pos_z);
   garmin_alt_estimator_->getState(1, vel_z);
 
-  // Set variables for hector further usage
+  // Set position and velocity for hector further usage
   hector_position_[0] = pos_x;
   hector_position_[1] = pos_y;
   hector_position_[2] = pos_z - std::abs(garmin_offset_);
@@ -1390,6 +1432,20 @@ void Odometry2::state_hector_reliable() {
   hector_velocity_[0] = vel_x;
   hector_velocity_[1] = vel_y;
   hector_velocity_[2] = vel_z;
+
+  // Get orientation from px orientation
+  std::string temp;
+  if (!tf_buffer_->canTransform(ned_origin_frame_, frd_fcu_frame_, rclcpp::Time(0), std::chrono::duration<double>(0), &temp)) {
+    RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000, "Hector state: Missing ned_origin to frd_fcu - waiting for px odometry initialization.");
+    return;
+  }
+
+  auto transform_stamped = tf_buffer_->lookupTransform(ned_origin_frame_, frd_fcu_frame_, rclcpp::Time(0));
+
+  hector_orientation_[0] = transform_stamped.transform.rotation.w;
+  hector_orientation_[1] = transform_stamped.transform.rotation.x;
+  hector_orientation_[2] = transform_stamped.transform.rotation.y;
+  hector_orientation_[3] = transform_stamped.transform.rotation.z;
 
   // Publish TFs and odometry
   publishHectorTF();
@@ -1453,6 +1509,21 @@ void Odometry2::state_hector_restart() {
   hector_lat_estimator_->setState(5, 0);
   time_odometry_timer_set_ = false;
 
+  // Reset hector position, velocity, and orientation
+  hector_position_[0] = 0;
+  hector_position_[1] = 0;
+  hector_position_[2] = 0;
+
+  hector_velocity_[0] = 0;
+  hector_velocity_[1] = 0;
+  hector_velocity_[2] = 0;
+
+  hector_orientation_[0] = 0;
+  hector_orientation_[1] = 0;
+  hector_orientation_[2] = 0;
+  hector_orientation_[3] = 0;
+
+  // Reset hector raw variables for hector callback
   hector_position_raw_[0]      = 0;
   hector_position_raw_[1]      = 0;
   hector_position_raw_prev_[0] = 0;
@@ -1518,6 +1589,7 @@ bool Odometry2::checkHectorReliability() {
 /* checkGpsReliability //{*/
 // the following mutexes have to be locked by the calling function:
 // gps_raw_mutex_
+// gps_mutex_
 bool Odometry2::checkGpsReliability() {
 
   // Check gps message interval//{
@@ -1527,29 +1599,52 @@ bool Odometry2::checkGpsReliability() {
     RCLCPP_WARN(get_logger(), "GPS message not received for %f seconds.", dt.count());
     if (dt.count() > gps_msg_interval_max_) {
       RCLCPP_WARN(get_logger(), "GPS message not received for %f seconds. Not reliable.", dt.count());
-      gps_eph_ = std::numeric_limits<float>::max();  // Set value to max in case GPS stop publishing
+      /* gps_eph_ = std::numeric_limits<float>::max();  // Set value to max in case GPS stop publishing */
       return false;
     }
   }
   /*//}*/
 
   /* Check gps quality//{*/
-  if (gps_eph_ > gps_eph_max_) {
-    if (c_gps_eph_err_++ >= gps_msg_err_) {  // GPS quality is lower for a specific number of consecutive messages
-      RCLCPP_WARN(get_logger(), "GPS quality is too low! Not reliable");
-      c_gps_eph_err_ = 0;
-      return false;
+  if (gps_state_ == estimator_state_t::reliable) {
 
+    if (gps_eph_ >= gps_eph_max_) {
+      if (c_gps_eph_err_++ >= gps_msg_err_) {  // GPS quality is lower for a specific number of consecutive messages
+        RCLCPP_WARN(get_logger(), "GPS quality is too low! Not reliable");
+        c_gps_eph_err_ = 0;
+        return false;
+
+      } else {
+        RCLCPP_WARN(get_logger(), "GPS quality is too low! #%d/#%d EPH value: %f", c_gps_eph_err_, gps_msg_err_, gps_eph_);
+        return true;
+      }
     } else {
-      RCLCPP_WARN(get_logger(), "GPS quality is too low! #%d/#%d EPH value: %f", c_gps_eph_err_, gps_msg_err_, gps_eph_);
+      c_gps_eph_err_ = 0;  // Reset the bad message counter
       return true;
     }
-  } else {
-    c_gps_eph_err_ = 0;  // Reset the bad message counter
-    return true;
   }
   /*//}*/
 
+  // GPS quality is getting better
+  if (gps_state_ == estimator_state_t::not_reliable) {
+    if (gps_eph_ < gps_eph_max_) {
+      if (c_gps_eph_good_++ >= gps_msg_good_) {
+
+        RCLCPP_WARN(get_logger(), "GPS quality is good! Reliable.");
+        c_gps_eph_good_ = 0;
+        return true;
+
+      } else {
+        RCLCPP_WARN(get_logger(), "GPS quality is improving! #%d EPH value: %f", c_gps_eph_good_, gps_eph_);
+        return false;
+      }
+    } else {
+      c_gps_eph_good_ = 0;  // Reset the good message counter
+      return false;
+    }
+  }
+  assert(false);
+  RCLCPP_ERROR(get_logger(), "This should not happen.");
 } /*//}*
 
 // --------------------------------------------------------------
@@ -1714,7 +1809,7 @@ void Odometry2::publishHectorTF() {
 // hector_lat_position_mutex_
 void Odometry2::publishHectorOdometry() {
 
-  std::scoped_lock lock(px4_pose_mutex_, timestamp_mutex_);
+  std::scoped_lock lock(timestamp_mutex_);
 
   std::string temp;
   if (!tf_buffer_->canTransform(ned_origin_frame_, hector_origin_frame_, rclcpp::Time(0), std::chrono::duration<double>(0), &temp)) {
@@ -1753,7 +1848,8 @@ void Odometry2::publishHectorOdometry() {
 
   hector_odometry_msg.x = hector_pos_tf.point.x;
   hector_odometry_msg.y = hector_pos_tf.point.y;
-  /* hector_odometry_msg.x = hector_pos_tf.point.x - px4_position_[0]; // Correcting hector position to the GPS position in case of the switch */
+  /* hector_odometry_msg.x = hector_pos_tf.point.x - px4_position_[0]; // Correcting hector position to the GPS position in case of the switch TODO: do not use
+   * position but rather get tf and use the value from it - do not need to lock mutex */
   /* hector_odometry_msg.y = hector_pos_tf.point.y - px4_position_[1]; */
   hector_odometry_msg.z = hector_pos_tf.point.z;
 
@@ -1765,10 +1861,10 @@ void Odometry2::publishHectorOdometry() {
   hector_odometry_msg.pitchspeed = NAN;
   hector_odometry_msg.yawspeed   = NAN;
 
-  hector_odometry_msg.q[0] = px4_orientation_[0];
-  hector_odometry_msg.q[1] = px4_orientation_[1];
-  hector_odometry_msg.q[2] = px4_orientation_[2];
-  hector_odometry_msg.q[3] = px4_orientation_[3];
+  hector_odometry_msg.q[0] = hector_orientation_[0];
+  hector_odometry_msg.q[1] = hector_orientation_[1];
+  hector_odometry_msg.q[2] = hector_orientation_[2];
+  hector_odometry_msg.q[3] = hector_orientation_[3];
 
   std::fill(hector_odometry_msg.q_offset.begin(), hector_odometry_msg.q_offset.end(), NAN);
   std::fill(hector_odometry_msg.pose_covariance.begin(), hector_odometry_msg.pose_covariance.end(), NAN);
@@ -1905,16 +2001,14 @@ bool Odometry2::updateEkfParameters() {
   std::vector<px4_int> px4_params_int;
 
   if (switching_state_ == odometry_state_t::gps) {
-    px4_params_int.push_back(px4_int("EKF2_AID_MASK", EKF_GPS_));
-    px4_params_int.push_back(px4_int("EKF2_HGT_MODE", hector_default_hgt_mode_));
+    return setPx4Params(gps_px4_params_int_, gps_px4_params_float_);
   } else if (switching_state_ == odometry_state_t::hector) {
-    px4_params_int.push_back(px4_int("EKF2_AID_MASK", EKF_HECTOR_));
-    px4_params_int.push_back(px4_int("EKF2_HGT_MODE", EKF_HECTOR_HEIGHT_));
+    return setPx4Params(hector_px4_params_int_, hector_px4_params_float_);
   } else {
     assert(false);
     RCLCPP_ERROR(get_logger(), "Invalid switching state, this should never happen!");
   }
-  return uploadPx4Parameters(std::make_shared<fog_msgs::srv::SetPx4ParamInt::Request>(), px4_params_int, set_px4_param_int_);
+  return false;
 }
 //}
 
@@ -1937,11 +2031,11 @@ geometry_msgs::msg::PoseStamped Odometry2::transformBetween(std::string& frame_f
 }
 //}
 
-/*setInitialPx4Params//{*/
-bool Odometry2::setInitialPx4Params() {
+/*setPx4Params//{*/
+bool Odometry2::setPx4Params(const std::vector<px4_int>& params_int, const std::vector<px4_float>& params_float) {
 
-  if (!uploadPx4Parameters(std::make_shared<fog_msgs::srv::SetPx4ParamInt::Request>(), px4_params_int_, set_px4_param_int_) ||
-      !uploadPx4Parameters(std::make_shared<fog_msgs::srv::SetPx4ParamFloat::Request>(), px4_params_float_, set_px4_param_float_)) {
+  if (!uploadPx4Parameters(std::make_shared<fog_msgs::srv::SetPx4ParamInt::Request>(), params_int, set_px4_param_int_) ||
+      !uploadPx4Parameters(std::make_shared<fog_msgs::srv::SetPx4ParamFloat::Request>(), params_float, set_px4_param_float_)) {
     return false;
   }
   return true;

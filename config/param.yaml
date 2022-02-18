@@ -1,34 +1,63 @@
 odometry_loop_rate: 100.0 # [Hz]
 gps_loop_rate:      50.0 # [Hz]
 hector_loop_rate:   50.0 # [Hz]
-# world_frame: now set by launch file argument
 
 # px4 # #{
 px4:
-    param_set_timeout:  1 # Minimal value is 1. If zero, the parameter will never be set [s]
-    EKF2_AID_MASK:      329 # default mask - will be changed according to hector and gps reliability
-    EKF2_EV_DELAY:      10.0 # hector measurements delay # 100~150
+  param_set_timeout:  1 # Minimal value is 1. If zero, the parameter will never be set [s]
+
+  # hector # #{
+  hector:
+    EKF2_AID_MASK:      328 # EV_POS + EV_VEL + ROTATE_EV
+    EKF2_EV_DELAY:      10.0 # hector measurements delay [ms-1]
     EKF2_EV_NOISE_MD:   1 # use px4 covariances
     EKF2_EVP_NOISE:     0.05 # position measurement covariance [m]
     EKF2_EVV_NOISE:     0.05 # velocity measurement covariance [ms-1]
 
-    EKF2_RNG_AID:     1 # Using the range sensor to estimate height if specific conditions are met
+    EKF2_RNG_AID:     1 # Using the range sensor for height fusion if specific conditions are met
     EKF2_RNG_A_HMAX:  5.0 # Max height to use ranger for fusion in aid mode
 
-    # Default source of height estimation  - will be changed according to sensor reliability:
+    # Default source of height estimation  - could be changed according to sensor reliability:
     # 0 - only barometer mode,
     # 1 - only gps,
     # 2 - rangefinder height mode
-    EKF2_HGT_MODE:    2 # Default source of height estimation - will be changed according to gps and rangefinder reliability
+    # 3 - vision odometry mode
+    EKF2_HGT_MODE:    3 # Default source of height estimation - will be changed according to gps and rangefinder reliability
 
     MPC_XY_CRUISE:    1.0 # Max speed for mission mode [ms-1]
     MC_YAWRATE_MAX:   20.0 # Max yaw rate [degs-1]
-    MPC_ACC_HOR:      0.5 # Acceleration for horizontal movement [ms-2] 3.0
-    MPC_ACC_HOR_MAX:  0.5 # Max acceleration for horizontal movement [ms-2] 3.0
+    MPC_ACC_HOR:      0.5 # Acceleration for horizontal movement [ms-2]
+    MPC_ACC_HOR_MAX:  0.5 # Max acceleration for horizontal movement [ms-2]
     MPC_JERK_AUTO:    3.0 # Change of the acceleration [ms-3]
     MPC_JERK_MAX:     3.0 # Max change of the acceleration [ms-3]
-    MPC_ACC_DOWN_MAX: 1.0 #0.5 # Max acceleration for vertical move down [ms-2] 3.0
-    MPC_ACC_UP_MAX:   1.0 #0.5 # Max acceleration for vertical move up [ms-2] 4.0
+    MPC_ACC_DOWN_MAX: 1.0 # Max acceleration for vertical move down [ms-2]
+    MPC_ACC_UP_MAX:   1.0 # Max acceleration for vertical move up [ms-2]
+  # # #}
+
+  # gps # #{
+  gps:
+    EKF2_AID_MASK:    1 # GPS
+
+    EKF2_RNG_AID:     1 # Using the range sensor for height fusion if specific conditions are met
+    EKF2_RNG_A_HMAX:  5.0 # Max height to use ranger for fusion in aid mode
+
+    # Default source of height estimation  - could be changed according to sensor reliability:
+    # 0 - only barometer mode,
+    # 1 - only gps,
+    # 2 - rangefinder height mode
+    # 3 - vision odometry mode
+    EKF2_HGT_MODE:    2 # Default source of height estimation - will be changed according to gps and rangefinder reliability
+
+    MPC_XY_CRUISE:    5.0 # Max speed for mission mode [ms-1]
+    MC_YAWRATE_MAX:   200.0 # Max yaw rate [degs-1]
+    MPC_ACC_HOR:      3.0 # Acceleration for horizontal movement [ms-2]
+    MPC_ACC_HOR_MAX:  5.0 # Max acceleration for horizontal movement [ms-2]
+    MPC_JERK_AUTO:    4.0 # Change of the acceleration [ms-3]
+    MPC_JERK_MAX:     8.0 # Max change of the acceleration [ms-3]
+    MPC_ACC_DOWN_MAX: 3.0 # Max acceleration for vertical move down [ms-2]
+    MPC_ACC_UP_MAX:   4.0 # Max acceleration for vertical move up [ms-2]
+  # # #}
+
 # # #}
 
 # gps # #{
