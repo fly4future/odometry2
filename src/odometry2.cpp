@@ -938,6 +938,7 @@ void Odometry2::odometryPublisherRoutine() {
   std::scoped_lock lock(odometry_mutex_, px4_pose_mutex_);
 
   if (odometry_state_ != odometry_state_t::init || odometry_state_ != odometry_state_t::not_connected) {
+    RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000, "Odometry publisher: Waiting to set the GPS");
     // publish odometry
     publishTF();
     publishOdometry();
