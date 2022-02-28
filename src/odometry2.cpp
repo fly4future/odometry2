@@ -265,9 +265,11 @@ private:
 
   rclcpp::TimerBase::SharedPtr odometry_timer_;
   rclcpp::TimerBase::SharedPtr odometry_diagnostics_timer_;
+  rclcpp::TimerBase::SharedPtr odometry_publisher_timer_;
 
   void odometryRoutine(void);
   void odometryDiagnosticsRoutine(void);
+  void odometryPublisherRoutine(void);
 
   void update_odometry_state();
   void state_odometry_not_connected();
@@ -279,6 +281,8 @@ private:
   void state_odometry_landed();
 
   void publishOdometryDiagnostics();
+  void publishTF();
+  void publishOdometry();
 
   // | ------------------ GPS estimator routine ----------------- |
   std::recursive_mutex gps_mutex_;
@@ -610,6 +614,8 @@ Odometry2::Odometry2(rclcpp::NodeOptions options) : Node("odometry2", options) {
       this->create_wall_timer(std::chrono::duration<double>(1.0 / odometry_loop_rate_), std::bind(&Odometry2::odometryRoutine, this), new_cbk_grp());
   odometry_diagnostics_timer_ =
       this->create_wall_timer(std::chrono::duration<double>(1.0 / odometry_loop_rate_), std::bind(&Odometry2::odometryDiagnosticsRoutine, this), new_cbk_grp());
+  odometry_publisher_timer_ =
+      this->create_wall_timer(std::chrono::duration<double>(1.0 / odometry_loop_rate_), std::bind(&Odometry2::odometryPublisherRoutine, this), new_cbk_grp());
 
   // | -------------------- GPS routine -------------------- |
 
@@ -923,6 +929,19 @@ void Odometry2::odometryDiagnosticsRoutine() {
 
   // publish some diags
   publishOdometryDiagnostics();
+}
+//}
+
+/* odometryPublisherRoutine(); //{ */
+void Odometry2::odometryPublisherRoutine() {
+  scope_timer      tim(scope_timer_enable_, "odometryPublisherRoutine", get_logger(), scope_timer_throttle_, scope_timer_min_dur_);
+  std::scoped_lock lock(odometry_mutex_, px4_pose_mutex_);
+
+  if (odometry_state_ != odometry_state_t::init || odometry_state_ != odometry_state_t::not_connected) {
+    // publish odometry
+    publishTF();
+    publishOdometry();
+  }
 }
 //}
 
@@ -1696,6 +1715,20 @@ void Odometry2::publishStaticTF() {
 // the following mutexes have to be locked by the calling function:
 // px4_pose_mutex_
 void Odometry2::publishGpsTF() {
+}
+//}
+
+/* publishGpsOdometry //{ */
+// the following mutexes have to be locked by the calling function:
+// px4_pose_mutex_
+void Odometry2::publishGpsOdometry() {
+}
+//}
+
+/* publishTF //{ */
+// the following mutexes have to be locked by the calling function:
+// px4_pose_mutex_
+void Odometry2::publishTF() {
 
   if (tf_broadcaster_ == nullptr) {
     tf_broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(this->shared_from_this());
@@ -1717,10 +1750,10 @@ void Odometry2::publishGpsTF() {
 }
 //}
 
-/* publishGpsOdometry //{ */
+/* publishOdometry //{ */
 // the following mutexes have to be locked by the calling function:
 // px4_pose_mutex_
-void Odometry2::publishGpsOdometry() {
+void Odometry2::publishOdometry() {
 
   // frd -> flu (enu) is rotation 180 degrees around x
   tf2::Quaternion q_orig, q_rot, q_new;

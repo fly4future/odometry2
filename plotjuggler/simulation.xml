@@ -1,12 +1,12 @@
 <?xml version='1.0' encoding='UTF-8'?>
 <root>
  <tabbed_widget name="Main Window" parent="main_window">
-  <Tab containers="1" tab_name="Position">
+  <Tab tab_name="Position" containers="1">
    <Container>
-    <DockSplitter orientation="-" count="3" sizes="0.333684;0.332632;0.333684">
+    <DockSplitter sizes="0.333684;0.332632;0.333684" count="3" orientation="-">
      <DockArea name="Normal X">
       <plot style="Lines" mode="TimeSeries">
-       <range top="2.040954" left="80.977374" bottom="1.991746" right="92.527690"/>
+       <range bottom="-0.009767" top="0.024786" right="15.217311" left="0.000218"/>
        <limitY/>
        <curve color="#ff0000" name="/ssrc_fog_x/fmu/vehicle_local_position/out/y"/>
        <curve color="#00fa16" name="/ssrc_fog_x/fmu/vehicle_visual_odometry/in/y"/>
@@ -14,7 +14,7 @@
      </DockArea>
      <DockArea name="Normal Y">
       <plot style="Lines" mode="TimeSeries">
-       <range top="-2.968859" left="80.977374" bottom="-3.014352" right="92.527690"/>
+       <range bottom="-0.034328" top="0.014027" right="15.217311" left="0.000218"/>
        <limitY/>
        <curve color="#ff0001" name="/ssrc_fog_x/fmu/vehicle_local_position/out/x"/>
        <curve color="#20ff00" name="/ssrc_fog_x/fmu/vehicle_visual_odometry/in/x"/>
@@ -22,12 +22,12 @@
      </DockArea>
      <DockArea name="Down Z">
       <plot style="Lines" mode="TimeSeries">
-       <range top="-1.978428" left="80.973003" bottom="-2.256624" right="92.527690"/>
+       <range bottom="-0.117148" top="0.183060" right="15.221448" left="0.000000"/>
        <limitY/>
        <curve color="#ff0700" name="/ssrc_fog_x/fmu/vehicle_local_position/out/z"/>
        <curve color="#ff9b0e" name="/ssrc_fog_x/fmu/distance_sensor/out/current_distance">
         <transform alias="/ssrc_fog_x/fmu/distance_sensor/out/current_distance[Scale/Offset]" name="Scale/Offset">
-         <options time_offset="0" value_offset="0" value_scale="-1.0"/>
+         <options value_offset="0" value_scale="-1.0" time_offset="0"/>
         </transform>
        </curve>
        <curve color="#03ff00" name="/ssrc_fog_x/fmu/vehicle_visual_odometry/in/z"/>
@@ -36,12 +36,12 @@
     </DockSplitter>
    </Container>
   </Tab>
-  <Tab containers="1" tab_name="Speed">
+  <Tab tab_name="Speed" containers="1">
    <Container>
-    <DockSplitter orientation="-" count="3" sizes="0.35;0.35;0.3">
+    <DockSplitter sizes="0.333684;0.332632;0.333684" count="3" orientation="-">
      <DockArea name="...">
       <plot style="Lines" mode="TimeSeries">
-       <range top="0.025358" left="0.000275" bottom="-0.031886" right="1.005876"/>
+       <range bottom="-0.028376" top="0.032542" right="8.590196" left="0.000218"/>
        <limitY/>
        <curve color="#ff0300" name="/ssrc_fog_x/fmu/vehicle_local_position/out/vx"/>
        <curve color="#0019ff" name="/ssrc_fog_x/odometry/pixhawk_hector/twist/twist/linear/x"/>
@@ -49,7 +49,7 @@
      </DockArea>
      <DockArea name="...">
       <plot style="Lines" mode="TimeSeries">
-       <range top="0.034200" left="0.000275" bottom="-0.011428" right="1.005876"/>
+       <range bottom="-0.022519" top="0.045278" right="8.590196" left="0.000218"/>
        <limitY/>
        <curve color="#ff0000" name="/ssrc_fog_x/fmu/vehicle_local_position/out/vy"/>
        <curve color="#0017ff" name="/ssrc_fog_x/odometry/pixhawk_hector/twist/twist/linear/y"/>
@@ -57,7 +57,7 @@
      </DockArea>
      <DockArea name="...">
       <plot style="Lines" mode="TimeSeries">
-       <range top="0.093615" left="0.000275" bottom="0.016113" right="1.005876"/>
+       <range bottom="-0.006397" top="0.055061" right="8.588488" left="0.000218"/>
        <limitY/>
        <curve color="#ff0300" name="/ssrc_fog_x/fmu/vehicle_local_position/out/vz"/>
       </plot>
@@ -65,33 +65,33 @@
     </DockSplitter>
    </Container>
   </Tab>
-  <Tab containers="1" tab_name="Orientation">
+  <Tab tab_name="Orientation" containers="1">
    <Container>
-    <DockSplitter orientation="-" count="4" sizes="0.25;0.25;0.25;0.25">
+    <DockSplitter sizes="0.249737;0.25079;0.249737;0.249737" count="4" orientation="-">
      <DockArea name="...">
       <plot style="Lines" mode="TimeSeries">
-       <range top="0.100000" left="0.000000" bottom="-0.100000" right="0.000000"/>
+       <range bottom="-0.100000" top="0.100000" right="0.000000" left="0.000000"/>
        <limitY/>
        <curve color="#0d00e8" name="/ssrc_fog_x/VehicleOdometry_PubSubTopic/q.0"/>
       </plot>
      </DockArea>
      <DockArea name="...">
       <plot style="Lines" mode="TimeSeries">
-       <range top="0.100000" left="0.000000" bottom="-0.100000" right="0.000000"/>
+       <range bottom="-0.100000" top="0.100000" right="0.000000" left="0.000000"/>
        <limitY/>
        <curve color="#0009ff" name="/ssrc_fog_x/VehicleOdometry_PubSubTopic/q.1"/>
       </plot>
      </DockArea>
      <DockArea name="...">
       <plot style="Lines" mode="TimeSeries">
-       <range top="0.100000" left="0.000000" bottom="-0.100000" right="0.000000"/>
+       <range bottom="-0.100000" top="0.100000" right="0.000000" left="0.000000"/>
        <limitY/>
        <curve color="#0015ff" name="/ssrc_fog_x/VehicleOdometry_PubSubTopic/q.2"/>
       </plot>
      </DockArea>
      <DockArea name="...">
       <plot style="Lines" mode="TimeSeries">
-       <range top="0.100000" left="0.000000" bottom="-0.100000" right="0.000000"/>
+       <range bottom="-0.100000" top="0.100000" right="0.000000" left="0.000000"/>
        <limitY/>
        <curve color="#0017ff" name="/ssrc_fog_x/VehicleOdometry_PubSubTopic/q.3"/>
       </plot>
@@ -106,7 +106,7 @@
  <!-- - - - - - - - - - - - - - - -->
  <Plugins>
   <plugin ID="DataLoad CSV">
-   <default time_axis="" delimiter="0"/>
+   <default delimiter="0" time_axis=""/>
   </plugin>
   <plugin ID="DataLoad ROS2 bags">
    <use_header_stamp value="false"/>
@@ -125,14 +125,15 @@
     <topic name="/ssrc_fog_x/fmu/vehicle_local_position/out"/>
     <topic name="/ssrc_fog_x/fmu/vehicle_odometry/out"/>
     <topic name="/ssrc_fog_x/fmu/vehicle_visual_odometry/in"/>
+    <topic name="/ssrc_fog_x/odometry/local_odom"/>
     <topic name="/ssrc_fog_x/odometry/pixhawk_hector"/>
     <topic name="/ssrc_fog_x/timesync_status"/>
    </selected_topics>
   </plugin>
   <plugin ID="UDP Server"/>
   <plugin ID="WebSocket Server"/>
-  <plugin status="idle" ID="CSV Exporter"/>
-  <plugin status="idle" ID="ROS2 Topic Re-Publisher"/>
+  <plugin ID="CSV Exporter" status="idle"/>
+  <plugin ID="ROS2 Topic Re-Publisher" status="idle"/>
  </Plugins>
  <!-- - - - - - - - - - - - - - - -->
  <previouslyLoaded_Datafiles/>
