@@ -937,11 +937,12 @@ void Odometry2::odometryPublisherRoutine() {
   scope_timer      tim(scope_timer_enable_, "odometryPublisherRoutine", get_logger(), scope_timer_throttle_, scope_timer_min_dur_);
   std::scoped_lock lock(odometry_mutex_, px4_pose_mutex_);
 
-  if (odometry_state_ != odometry_state_t::init || odometry_state_ != odometry_state_t::not_connected) {
-    RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000, "Odometry publisher: Waiting to set the GPS");
+  if (odometry_state_ != odometry_state_t::init && odometry_state_ != odometry_state_t::not_connected) {
     // publish odometry
     publishTF();
     publishOdometry();
+  } else {
+    RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000, "Odometry publisher: Waiting to set the GPS");
   }
 }
 //}
