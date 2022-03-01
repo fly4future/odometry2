@@ -22,10 +22,12 @@
 #include <fog_msgs/msg/control_interface_diagnostics.hpp>
 #include <fog_msgs/msg/odometry_diagnostics.hpp>
 #include <fog_msgs/msg/estimator_diagnostics.hpp>
+#include <fog_msgs/msg/heading.hpp>
 
 #include <fog_lib/scope_timer.h>
 #include <fog_lib/params.h>
 #include <fog_lib/median_filter.h>
+#include <fog_lib/geometry/misc.h>
 
 #include <px4_msgs/msg/timesync.hpp>
 #include <px4_msgs/msg/vehicle_gps_position.hpp>
@@ -51,6 +53,7 @@ typedef std::tuple<std::string, float> px4_float;
 
 using namespace std::placeholders;
 using namespace fog_lib;
+using namespace fog_lib::geometry;
 
 namespace odometry2
 {
@@ -205,6 +208,7 @@ private:
   rclcpp::Publisher<fog_msgs::msg::EstimatorDiagnostics>::SharedPtr  gps_diagnostics_publisher_;
   rclcpp::Publisher<fog_msgs::msg::EstimatorDiagnostics>::SharedPtr  hector_diagnostics_publisher_;
   rclcpp::Publisher<px4_msgs::msg::VehicleVisualOdometry>::SharedPtr hector_odometry_publisher_;
+  rclcpp::Publisher<fog_msgs::msg::Heading>::SharedPtr               heading_publisher_;
 
   // | ----------------------- Subscribers ---------------------- |
   rclcpp::Subscription<px4_msgs::msg::VehicleOdometry>::SharedPtr             pixhawk_odom_subscriber_;
@@ -567,6 +571,7 @@ Odometry2::Odometry2(rclcpp::NodeOptions options) : Node("odometry2", options) {
   gps_diagnostics_publisher_      = this->create_publisher<fog_msgs::msg::EstimatorDiagnostics>("~/gps_diagnostics_out", qos);
   hector_diagnostics_publisher_   = this->create_publisher<fog_msgs::msg::EstimatorDiagnostics>("~/hector_diagnostics_out", qos);
   hector_odometry_publisher_      = this->create_publisher<px4_msgs::msg::VehicleVisualOdometry>("~/hector_odometry_out", qos);
+  heading_publisher_              = this->create_publisher<fog_msgs::msg::Heading>("~/heading_out", 10);
 
   // | ----------------------- Subscribers ---------------------- |
   rclcpp::SubscriptionOptions subopts;
@@ -1787,15 +1792,15 @@ void Odometry2::publishOdometry() {
   odom_msg.pose.pose       = pose_enu.pose;
 
   // Heading message
-  /* fog_msgs::msg::Heading heading_msg; */
+  fog_msgs::msg::Heading heading_msg;
 
-  /* heading_msg.header.stamp    = odom_msg.header.stamp; */
-  /* heading_msg.header.frame_id = local_origin_frame_; */
-  /* heading_msg.heading         = quat2heading(pose_enu.pose.orientation); */
+  heading_msg.header.stamp    = odom_msg.header.stamp;
+  heading_msg.header.frame_id = local_origin_frame_;
+  heading_msg.heading         = quat2heading(pose_enu.pose.orientation);
 
   // Publish messages
   local_odom_publisher_->publish(odom_msg);
-  /* heading_publisher_->publish(heading_msg); */
+  heading_publisher_->publish(heading_msg);
 }
 //}
 

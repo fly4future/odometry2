@@ -49,6 +49,7 @@ def generate_launch_description():
                     ("~/odometry_diagnostics_out", "~/odometry_diagnostics"),
                     ("~/gps_diagnostics_out", "~/gps_diagnostics"),
                     ("~/hector_diagnostics_out", "~/hector_diagnostics"),
+                    ("~/heading_out", "~/heading"),
                     # subscribers
                     ("~/pixhawk_odom_in", "/" + DRONE_DEVICE_ID + "/fmu/vehicle_odometry/out"),
                     ("~/timesync_in", "/" + DRONE_DEVICE_ID + "/fmu/timesync/out"),
