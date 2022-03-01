@@ -282,7 +282,7 @@ private:
   void state_odometry_gps();
   void state_odometry_hector();
   void state_odometry_missing_odometry();
-  void state_odometry_landed();
+  void state_odometry_waiting_odometry();
 
   void publishOdometryDiagnostics();
   void publishTF();
@@ -336,7 +336,7 @@ private:
   // | --------------------- Utils function --------------------- |
   bool setPx4Params(const std::vector<px4_int>& params_int, const std::vector<px4_float>& params_float);
   bool updateEkfParameters();
-  bool checkEstimatorReliability();
+  void checkEstimatorReliability();
 
   geometry_msgs::msg::PoseStamped transformBetween(std::string& frame_from, std::string& frame_to);
 
@@ -845,8 +845,8 @@ bool Odometry2::changeOdometryCallback(const std::shared_ptr<fog_msgs::srv::Chan
   if (!isValidType(request->odometry_type)) {
     RCLCPP_ERROR(get_logger(), "Value %d is not a valid odometry type", request->odometry_type.type);
     response->success = false;
-    response->message = ("Not a valid odometry type");
-    return false;
+    response->message = "Not a valid odometry type";
+    return true;
   }
 
   std::scoped_lock lock(gps_mutex_, hector_mutex_);
@@ -862,15 +862,19 @@ bool Odometry2::changeOdometryCallback(const std::shared_ptr<fog_msgs::srv::Chan
     RCLCPP_WARN(get_logger(), "Changing odometry to automatic GPS or HECTOR");
   } else if (request->odometry_type.type == 2) {
     if (gps_state_ != estimator_state_t::reliable) {
-      gps_state_ = estimator_state_t::not_reliable;
+      response->success = false;
+      response->message = "Cannot change only to GPS. GPS is not reliable. Current GPS state is " + to_string(gps_state_);
+      return true;
     }
     hector_state_ = estimator_state_t::inactive;
     RCLCPP_WARN(get_logger(), "Changing odometry to GPS only");
   } else if (request->odometry_type.type == 3) {
-    gps_state_ = estimator_state_t::inactive;
     if (hector_state_ != estimator_state_t::reliable) {
-      hector_state_ = estimator_state_t::not_reliable;
+      response->success = false;
+      response->message = "Cannot change only to HECTOR. HECTOR is not reliable. Current HECTOR state is " + to_string(hector_state_);
+      return true;
     }
+    gps_state_ = estimator_state_t::inactive;
     RCLCPP_WARN(get_logger(), "Changing odometry to HECTOR only");
   }
 
@@ -977,8 +981,8 @@ void Odometry2::update_odometry_state() {
     case odometry_state_t::missing_odometry:
       state_odometry_missing_odometry();
       break;
-    case odometry_state_t::landed:
-      state_odometry_landed();
+    case odometry_state_t::waiting_odometry:
+      state_odometry_waiting_odometry();
       break;
     default:
       assert(false);
@@ -1050,6 +1054,9 @@ void Odometry2::state_odometry_switching() {
   // Call land if missing odometry
   if (switching_state_ == odometry_state_t::missing_odometry) {
     odometry_state_ = odometry_state_t::missing_odometry;
+    assert(false);
+    RCLCPP_ERROR(get_logger(), "Missing odometry in a switch odometry should not happen.");
+
     return;
   }
 
@@ -1072,11 +1079,7 @@ void Odometry2::state_odometry_gps() {
 
   RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000, "Odometry state: GPS");
 
-  std::scoped_lock lock(gps_mutex_);
-
-  if (!checkEstimatorReliability()) {
-    return;
-  }
+  checkEstimatorReliability();
 }
 //}
 
@@ -1087,11 +1090,7 @@ void Odometry2::state_odometry_hector() {
 
   RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000, "Odometry state: Hector");
 
-  std::scoped_lock lock(hector_mutex_);
-
-  if (!checkEstimatorReliability()) {
-    return;
-  }
+  checkEstimatorReliability();
 }
 //}
 
@@ -1109,17 +1108,21 @@ void Odometry2::state_odometry_missing_odometry() {
     RCLCPP_ERROR(get_logger(), "Odometry state: Did not receive land response for 1 second, try again.");
     return;
   } else {
-    RCLCPP_INFO(get_logger(), "Odometry state: Land call successfull, switching to landed state");
-    odometry_state_ = odometry_state_t::landed;
+    RCLCPP_INFO(get_logger(), "Odometry state: Land call successfull, switching to waiting state");
+    odometry_state_ = odometry_state_t::waiting_odometry;
     return;
   }
 }
 //}
 
-/* state_odometry_landed//{ */
-void Odometry2::state_odometry_landed() {
+/* state_odometry_waiting_odometry//{ */
+// the following mutexes have to be locked by the calling function:
+// odometry_mutex_
+void Odometry2::state_odometry_waiting_odometry() {
 
-  RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000, "Odometry state: Landed");
+  RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000, "Odometry state: Waiting odometry");
+
+  checkEstimatorReliability();
 }
 //}
 
@@ -2004,7 +2007,7 @@ void Odometry2::publishHectorDiagnostics() {
 /* checkEstimatorReliability//{ */
 // the following mutexes have to be locked by the calling function:
 // odometry_mutex_
-bool Odometry2::checkEstimatorReliability() {
+void Odometry2::checkEstimatorReliability() {
 
   std::scoped_lock lock(gps_mutex_, hector_mutex_);
 
@@ -2017,7 +2020,13 @@ bool Odometry2::checkEstimatorReliability() {
   } else if (gps_state_ != estimator_state_t::reliable && hector_state_ == estimator_state_t::reliable) {
     switching_state_ = odometry_state_t::hector;
   } else if (gps_state_ != estimator_state_t::reliable && hector_state_ != estimator_state_t::reliable) {
-    switching_state_ = odometry_state_t::missing_odometry;
+    // Check if the node is already waiting for a reliable estimator
+    if (odometry_state_ == odometry_state_t::waiting_odometry) {
+      return;
+    } else {
+      odometry_state_ = odometry_state_t::missing_odometry;
+      return;
+    }
   } else {
     switching_state_ = odometry_state_t::invalid;
     assert(false);
@@ -2027,9 +2036,7 @@ bool Odometry2::checkEstimatorReliability() {
   // Check if odometry state is planned to change
   if (prev_state != switching_state_) {
     odometry_state_ = odometry_state_t::switching;
-    return false;
   }
-  return true;
 }
 //}
 
