@@ -79,7 +79,8 @@ hector:
     msg_interval_max:   0.8 # max interval between messages before not reliable hector [s]
     max_velocity:       2.0 # max velocity of the hector estimator to believe hector [ms-1]
     max_position_jump:  1.0 # max position difference between consequent hector poses. 4 is default [m]
-    reset_wait:         5.0 # wait time until the next hector reset attempt [s]
+    reset_wait:         10.0 # wait time until the next hector reset attempt [s]
+    reliable_time_limit: 2.0 # wait time until the hector is reset if messages are not reliable [s]
     reset_response_wait: 3 # wait time for hector response [s]
 # # #}
 

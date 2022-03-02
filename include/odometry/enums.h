@@ -111,6 +111,7 @@ enum struct estimator_state_t
   reliable,
   not_reliable,
   restart,
+  restarting,
   inactive,
 };
 
@@ -125,6 +126,8 @@ static inline estimator_state_t to_enum(const fog_msgs::msg::EstimatorState msg)
       return estimator_state_t::not_reliable;
     case fog_msgs::msg::EstimatorState::RESTART:
       return estimator_state_t::restart;
+    case fog_msgs::msg::EstimatorState::RESTARTING:
+      return estimator_state_t::restarting;
     case fog_msgs::msg::EstimatorState::INACTIVE:
       return estimator_state_t::inactive;
     default:
@@ -148,6 +151,9 @@ static inline fog_msgs::msg::EstimatorState to_msg(const estimator_state_t enum_
     case estimator_state_t::restart:
       msg.state = fog_msgs::msg::EstimatorState::RESTART;
       break;
+    case estimator_state_t::restarting:
+      msg.state = fog_msgs::msg::EstimatorState::RESTARTING;
+      break;
     case estimator_state_t::inactive:
       msg.state = fog_msgs::msg::EstimatorState::INACTIVE;
       break;
@@ -169,6 +175,8 @@ static inline std::string to_string(const estimator_state_t enum_val) {
       return "not_reliable";
     case estimator_state_t::restart:
       return "restart";
+    case estimator_state_t::restarting:
+      return "restarting";
     case estimator_state_t::inactive:
       return "inactive";
     default:

@@ -143,7 +143,7 @@ private:
   float  hector_msg_interval_warn_   = 0.0;
   double hector_hdg_previous_        = 0.0;
   float  hector_reset_wait_          = 0.0;
-  float  hector_fusion_wait_         = 0.0;
+  float  hector_reliable_time_limit_ = 0.0;
   float  hector_max_position_jump_   = 0.0;
   float  hector_max_velocity_        = 0.0;
 
@@ -159,6 +159,7 @@ private:
 
   std::chrono::time_point<std::chrono::system_clock> hector_reset_called_time_ = std::chrono::system_clock::now();  // Last hector reset time
   std::chrono::time_point<std::chrono::system_clock> hector_last_msg_time_;
+  std::chrono::time_point<std::chrono::system_clock> hector_reliable_time_;
 
   // | ------------------------- Garmin ------------------------- |
   std::atomic_bool getting_garmin_ = false;
@@ -306,6 +307,7 @@ private:
   void state_gps_not_reliable();
   void state_gps_inactive();
   void state_gps_restart();
+  void state_gps_restarting();
 
   void publishGpsDiagnostics();
 
@@ -326,9 +328,11 @@ private:
   void state_hector_reliable();
   void state_hector_not_reliable();
   void state_hector_restart();
+  void state_hector_restarting();
   void state_hector_inactive();
 
   void publishHectorDiagnostics();
+  void updateHectorEstimator();
 
   // | -------------------- Routine handling -------------------- |
   rclcpp::CallbackGroup::SharedPtr callback_group_;
@@ -382,6 +386,7 @@ Odometry2::Odometry2(rclcpp::NodeOptions options) : Node("odometry2", options) {
   loaded_successfully &= parse_param("hector.active", temp, *this);
   hector_active_.store(temp);
   loaded_successfully &= parse_param("hector.reset_wait", hector_reset_wait_, *this);
+  loaded_successfully &= parse_param("hector.reliable_time_limit", hector_reliable_time_limit_, *this);
   loaded_successfully &= parse_param("hector.reset_response_wait", hector_reset_response_wait_, *this);
   loaded_successfully &= parse_param("hector.num_init_msgs", hector_num_init_msgs_, *this);
   loaded_successfully &= parse_param("hector.msg_interval_max", hector_msg_interval_max_, *this);
@@ -857,7 +862,8 @@ bool Odometry2::changeOdometryCallback(const std::shared_ptr<fog_msgs::srv::Chan
       gps_state_ = estimator_state_t::not_reliable;
     }
     if (hector_state_ != estimator_state_t::reliable) {
-      hector_state_ = estimator_state_t::not_reliable;
+      hector_state_         = estimator_state_t::not_reliable;
+      hector_reliable_time_ = std::chrono::system_clock::now();
     }
     RCLCPP_WARN(get_logger(), "Changing odometry to automatic GPS or HECTOR");
   } else if (request->odometry_type.type == 2) {
@@ -897,14 +903,14 @@ bool Odometry2::resetHectorCallback([[maybe_unused]] const std::shared_ptr<std_s
   std::scoped_lock lock(hector_mutex_);
 
   // Check if hector might be already in reset mode
-  if (hector_state_ == estimator_state_t::restart || hector_state_ == estimator_state_t::not_reliable) {
+  if (hector_state_ == estimator_state_t::restart || hector_state_ == estimator_state_t::restarting) {
     response->message = "Hector in reset mode";
     response->success = false;
     RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 500, "Hector state: Already in reset mode.");
     return true;
   }
 
-  hector_state_ = estimator_state_t::not_reliable;
+  hector_state_ = estimator_state_t::restart;
   RCLCPP_WARN(get_logger(), "Hector state: Service set hector to the restart.");
 
   response->message = "Hector set to restart.";
@@ -946,7 +952,8 @@ void Odometry2::odometryPublisherRoutine() {
   scope_timer      tim(scope_timer_enable_, "odometryPublisherRoutine", get_logger(), scope_timer_throttle_, scope_timer_min_dur_);
   std::scoped_lock lock(odometry_mutex_, px4_pose_mutex_);
 
-  if (odometry_state_ != odometry_state_t::init && odometry_state_ != odometry_state_t::not_connected) {
+  if (odometry_state_ != odometry_state_t::init && odometry_state_ != odometry_state_t::not_connected &&
+      odometry_state_ != odometry_state_t::missing_odometry) {
     // publish odometry
     publishTF();
     publishOdometry();
@@ -1174,6 +1181,9 @@ void Odometry2::update_gps_state() {
     case estimator_state_t::restart:
       state_gps_restart();
       break;
+    case estimator_state_t::restarting:
+      state_gps_restarting();
+      break;
     default:
       assert(false);
       RCLCPP_ERROR(get_logger(), "Invalid gps state, this should never happen!");
@@ -1289,6 +1299,15 @@ void Odometry2::state_gps_restart() {
 }
 //}
 
+/* state_gps_restarting//{ */
+// the following mutexes have to be locked by the calling function:
+// gps_mutex_
+void Odometry2::state_gps_restarting() {
+  assert(false);
+  RCLCPP_ERROR(get_logger(), "GPS in restart mode, this should never happen!");
+}
+//}
+
 // --------------------------------------------------------------
 // |                  Hector estimator routine                  |
 // --------------------------------------------------------------
@@ -1336,6 +1355,9 @@ void Odometry2::update_hector_state() {
       break;
     case estimator_state_t::restart:
       state_hector_restart();
+      break;
+    case estimator_state_t::restarting:
+      state_hector_restarting();
       break;
     default:
       assert(false);
@@ -1402,7 +1424,8 @@ void Odometry2::state_hector_init() {
     hector_state_ = estimator_state_t::inactive;
     return;
   }
-  hector_state_ = estimator_state_t::reliable;
+  hector_state_         = estimator_state_t::not_reliable;
+  hector_reliable_time_ = std::chrono::system_clock::now();
 }
 //}
 
@@ -1413,7 +1436,7 @@ void Odometry2::state_hector_reliable() {
 
   RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000, "Hector state: Reliable");
 
-  std::scoped_lock lock(hector_raw_mutex_, hector_lat_estimator_mutex_, hector_lat_position_mutex_, garmin_mutex_);
+  std::scoped_lock lock(hector_raw_mutex_, hector_lat_position_mutex_);
 
   // Check hector reliability
   if (!checkHectorReliability()) {
@@ -1421,60 +1444,7 @@ void Odometry2::state_hector_reliable() {
     return;
   }
 
-  // Add data into estimator, process the data
-
-  // Calculate time since last estimators update
-  std::chrono::time_point<std::chrono::high_resolution_clock> time_now = std::chrono::high_resolution_clock::now();
-  std::chrono::duration<double, std::milli>                   dt       = (time_now - time_odometry_timer_prev_) / 1000;
-
-  if (dt.count() <= 0) {
-    RCLCPP_WARN(get_logger(), "Odometry timer dt=%f is lower than zero, skipping estimator update.", dt.count());
-    return;
-  }
-
-  time_odometry_timer_prev_ = time_now;
-
-  // Latitude estimator update and predict
-  hector_lat_estimator_->doCorrection(hector_position_raw_[0], hector_position_raw_[1], LAT_HECTOR);
-  hector_lat_estimator_->doPrediction(0.0, 0.0, dt.count());
-
-  // Altitude estimator update and predict
-  garmin_alt_estimator_->doCorrection(garmin_measurement_, ALT_GARMIN);
-  garmin_alt_estimator_->doPrediction(0.0, dt.count());
-
-  // Obtain positions and velocities from estimators
-  double pos_x, pos_y, pos_z, vel_x, vel_y, vel_z;
-
-  hector_lat_estimator_->getState(0, pos_x);
-  hector_lat_estimator_->getState(1, pos_y);
-  hector_lat_estimator_->getState(2, vel_x);
-  hector_lat_estimator_->getState(3, vel_y);
-
-  garmin_alt_estimator_->getState(0, pos_z);
-  garmin_alt_estimator_->getState(1, vel_z);
-
-  // Set position and velocity for hector further usage
-  hector_position_[0] = pos_x;
-  hector_position_[1] = pos_y;
-  hector_position_[2] = pos_z - std::abs(garmin_offset_);
-
-  hector_velocity_[0] = vel_x;
-  hector_velocity_[1] = vel_y;
-  hector_velocity_[2] = vel_z;
-
-  // Get orientation from px orientation
-  std::string temp;
-  if (!tf_buffer_->canTransform(ned_origin_frame_, frd_fcu_frame_, rclcpp::Time(0), std::chrono::duration<double>(0), &temp)) {
-    RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000, "Hector state: Missing ned_origin to frd_fcu - waiting for px odometry initialization.");
-    return;
-  }
-
-  auto transform_stamped = tf_buffer_->lookupTransform(ned_origin_frame_, frd_fcu_frame_, rclcpp::Time(0));
-
-  hector_orientation_[0] = transform_stamped.transform.rotation.w;
-  hector_orientation_[1] = transform_stamped.transform.rotation.x;
-  hector_orientation_[2] = transform_stamped.transform.rotation.y;
-  hector_orientation_[3] = transform_stamped.transform.rotation.z;
+  updateHectorEstimator();
 
   // Publish TFs and odometry
   publishHectorTF();
@@ -1489,11 +1459,37 @@ void Odometry2::state_hector_not_reliable() {
 
   RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000, "Hector state: Not reliable.");
 
+  if (checkHectorReliability()) {
+    // Calculate the duration of hector reliability
+    std::chrono::duration<double> dt = std::chrono::system_clock::now() - hector_reliable_time_;
+    if (dt.count() > hector_reliable_time_limit_) {
+      // Hector is reliable for a long time - reliable
+      RCLCPP_INFO(get_logger(), "Hector state: Reliable for %f seconds. Switch state to reliable.", hector_reliable_time_limit_);
+      hector_state_ = estimator_state_t::reliable;
+      return;
+    }
+  } else {
+    hector_state_ = estimator_state_t::restart;
+    return;
+  }
+
+  updateHectorEstimator();
+
+}  // namespace odometry2
+//}
+
+/* state_hector_restart//{ */
+// the following mutexes have to be locked by the calling function:
+// hector_mutex_
+void Odometry2::state_hector_restart() {
+
+  RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000, "Hector state: Restart.");
+
   // Check the last hector reset time
   std::chrono::duration<double> dt = std::chrono::system_clock::now() - hector_reset_called_time_;
   if (dt.count() > hector_reset_wait_) {
-    RCLCPP_INFO(get_logger(), "Hector state: State change to restart.");
-    hector_state_ = estimator_state_t::restart;
+    RCLCPP_INFO(get_logger(), "Hector state: State change to restarting.");
+    hector_state_ = estimator_state_t::restarting;
   } else {
     RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000, "Hector state: Waiting for next hector reset availability. Call again in dt: %f",
                          hector_reset_wait_ - dt.count());
@@ -1510,14 +1506,14 @@ void Odometry2::state_hector_inactive() {
 }
 //}
 
-/* state_hector_restart//{ */
+/* state_hector_restarting//{ */
 // the following mutexes have to be locked by the calling function:
 // hector_mutex_
-void Odometry2::state_hector_restart() {
+void Odometry2::state_hector_restarting() {
 
-  RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000, "Hector state: Restart.");
+  RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000, "Hector state: Restarting.");
 
-  std::scoped_lock lock(hector_raw_mutex_, hector_lat_estimator_mutex_);
+  std::scoped_lock lock(hector_raw_mutex_, hector_lat_estimator_mutex_, hector_lat_position_mutex_);
 
   // Reset hector
   auto future_response = reset_hector_client_->async_send_request(std::make_shared<std_srvs::srv::Trigger::Request>());
@@ -1998,6 +1994,70 @@ void Odometry2::publishHectorDiagnostics() {
   msg.estimator_state = to_msg(hector_state_);
 
   hector_diagnostics_publisher_->publish(msg);
+}
+//}
+
+/* updateHectorEstimator //{ */
+// the following mutexes have to be locked by the calling function:
+// hector_mutex_
+// hector_raw_mutex_
+// hector_lat_position_mutex_
+void Odometry2::updateHectorEstimator() {
+
+  std::scoped_lock lock(hector_lat_estimator_mutex_, garmin_mutex_);
+
+  // Calculate time since last estimators update
+  std::chrono::time_point<std::chrono::high_resolution_clock> time_now = std::chrono::high_resolution_clock::now();
+  std::chrono::duration<double, std::milli>                   dt       = (time_now - time_odometry_timer_prev_) / 1000;
+
+  if (dt.count() <= 0) {
+    RCLCPP_WARN(get_logger(), "Odometry timer dt=%f is lower than zero, skipping estimator update.", dt.count());
+    return;
+  }
+
+  time_odometry_timer_prev_ = time_now;
+
+  // Latitude estimator update and predict
+  hector_lat_estimator_->doCorrection(hector_position_raw_[0], hector_position_raw_[1], LAT_HECTOR);
+  hector_lat_estimator_->doPrediction(0.0, 0.0, dt.count());
+
+  // Altitude estimator update and predict
+  garmin_alt_estimator_->doCorrection(garmin_measurement_, ALT_GARMIN);
+  garmin_alt_estimator_->doPrediction(0.0, dt.count());
+
+  // Obtain positions and velocities from estimators
+  double pos_x, pos_y, pos_z, vel_x, vel_y, vel_z;
+
+  hector_lat_estimator_->getState(0, pos_x);
+  hector_lat_estimator_->getState(1, pos_y);
+  hector_lat_estimator_->getState(2, vel_x);
+  hector_lat_estimator_->getState(3, vel_y);
+
+  garmin_alt_estimator_->getState(0, pos_z);
+  garmin_alt_estimator_->getState(1, vel_z);
+
+  // Set position and velocity for hector further usage
+  hector_position_[0] = pos_x;
+  hector_position_[1] = pos_y;
+  hector_position_[2] = pos_z - std::abs(garmin_offset_);
+
+  hector_velocity_[0] = vel_x;
+  hector_velocity_[1] = vel_y;
+  hector_velocity_[2] = vel_z;
+
+  // Get orientation from px orientation
+  std::string temp;
+  if (!tf_buffer_->canTransform(ned_origin_frame_, frd_fcu_frame_, rclcpp::Time(0), std::chrono::duration<double>(0), &temp)) {
+    RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000, "Hector state: Missing ned_origin to frd_fcu - waiting for px odometry initialization.");
+    return;
+  }
+
+  auto transform_stamped = tf_buffer_->lookupTransform(ned_origin_frame_, frd_fcu_frame_, rclcpp::Time(0));
+
+  hector_orientation_[0] = transform_stamped.transform.rotation.w;
+  hector_orientation_[1] = transform_stamped.transform.rotation.x;
+  hector_orientation_[2] = transform_stamped.transform.rotation.y;
+  hector_orientation_[3] = transform_stamped.transform.rotation.z;
 }
 //}
 
