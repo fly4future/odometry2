@@ -269,6 +269,7 @@ private:
   odometry_state_t     switching_state_ = odometry_state_t::init;  // State indicating the targeting switch state
   double               odometry_loop_rate_;
   std::atomic_bool     manual_detected_ = false;
+  std::atomic_bool     flying_detected_ = false;
 
   rclcpp::TimerBase::SharedPtr odometry_timer_;
   rclcpp::TimerBase::SharedPtr odometry_diagnostics_timer_;
@@ -832,6 +833,14 @@ void Odometry2::ControlInterfaceDiagnosticsCallback([[maybe_unused]] const fog_m
     return;
   }
 
+  if (msg->vehicle_state.state == fog_msgs::msg::ControlInterfaceVehicleState::AUTONOMOUS_FLIGHT ||
+      msg->vehicle_state.state == fog_msgs::msg::ControlInterfaceVehicleState::TAKING_OFF) {
+    RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 10000, "Vehicle is in the air!");
+    flying_detected_ = true;
+  } else {
+    flying_detected_ = false;
+  }
+
   // Check if manual flight mode
   if (msg->vehicle_state.state == fog_msgs::msg::ControlInterfaceVehicleState::MANUAL_FLIGHT) {
     RCLCPP_WARN(get_logger(), "Detected manual flight switch!");
@@ -1078,7 +1087,7 @@ void Odometry2::state_odometry_switching() {
 
   RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000, "Odometry state: Switching state");
 
-  // Call land if missing odometry
+  // Call missing_odometry if happen
   if (switching_state_ == odometry_state_t::missing_odometry) {
     odometry_state_ = odometry_state_t::missing_odometry;
     assert(false);
@@ -1134,13 +1143,19 @@ void Odometry2::state_odometry_missing_odometry() {
   RCLCPP_ERROR_THROTTLE(get_logger(), *get_clock(), 1000, "Odometry state: Missing odometry");
 
   // Call land via control_interface package
-  auto future_response = land_client_->async_send_request(std::make_shared<std_srvs::srv::Trigger::Request>());
-  RCLCPP_WARN(get_logger(), "Odometry state: Land called.");
-  if (future_response.wait_for(std::chrono::seconds(1)) == std::future_status::timeout || future_response.get() == nullptr) {
-    RCLCPP_ERROR(get_logger(), "Odometry state: Did not receive land response for 1 second, try again.");
-    return;
+  if (flying_detected_) {
+    auto future_response = land_client_->async_send_request(std::make_shared<std_srvs::srv::Trigger::Request>());
+    RCLCPP_WARN(get_logger(), "Odometry state: Land called.");
+    if (future_response.wait_for(std::chrono::seconds(1)) == std::future_status::timeout || future_response.get() == nullptr) {
+      RCLCPP_ERROR(get_logger(), "Odometry state: Did not receive land response for 1 second, try again.");
+      return;
+    } else {
+      RCLCPP_INFO(get_logger(), "Odometry state: Land call successfull, switching to waiting state");
+      odometry_state_ = odometry_state_t::waiting_odometry;
+      return;
+    }
   } else {
-    RCLCPP_INFO(get_logger(), "Odometry state: Land call successfull, switching to waiting state");
+    RCLCPP_INFO(get_logger(), "Odometry state: Vehicle is not in the air, switching to waiting state");
     odometry_state_ = odometry_state_t::waiting_odometry;
     return;
   }
