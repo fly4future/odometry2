@@ -90,6 +90,7 @@ private:
   std::atomic_bool                                     publishing_static_tf_ = false;
 
   // | ---------------------- PX parameters --------------------- |
+  odometry_state_t       last_set_parameters_ = odometry_state_t::init;
   std::vector<px4_int>   hector_px4_params_int_;
   std::vector<px4_float> hector_px4_params_float_;
   std::vector<px4_int>   gps_px4_params_int_;
@@ -1024,6 +1025,7 @@ void Odometry2::state_odometry_init() {
   if (!set_initial_px4_params_) {
     RCLCPP_INFO(get_logger(), "Odometry state: Setting initial PX4 parameters for GPS.");
     if (setPx4Params(gps_px4_params_int_, gps_px4_params_float_)) {
+      last_set_parameters_    = odometry_state_t::gps;
       set_initial_px4_params_ = true;
     } else {
       RCLCPP_ERROR(get_logger(), "Odometry state: Fail to set all PX4 parameters. Will repeat in next cycle.");
@@ -1127,7 +1129,7 @@ void Odometry2::state_odometry_missing_odometry() {
 // odometry_mutex_
 void Odometry2::state_odometry_waiting_odometry() {
 
-  RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000, "Odometry state: Waiting odometry");
+  RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000, "Odometry state: Waiting for reliable odometry");
 
   checkEstimatorReliability();
 }
@@ -1559,7 +1561,7 @@ void Odometry2::state_hector_restarting() {
   hector_reset_called_time_ = std::chrono::system_clock::now();
   getting_hector_           = false;
 
-  RCLCPP_INFO(get_logger(), "Hector state: Hector restarted!");
+  RCLCPP_INFO(get_logger(), "Hector state: Hector estimator restarted!");
 
   hector_state_ = estimator_state_t::init;
 }
@@ -2108,9 +2110,25 @@ bool Odometry2::updateEkfParameters() {
   std::vector<px4_int> px4_params_int;
 
   if (switching_state_ == odometry_state_t::gps) {
-    return setPx4Params(gps_px4_params_int_, gps_px4_params_float_);
+    if (last_set_parameters_ == odometry_state_t::gps) {
+      // Parameters are already set up from before, return right away
+      RCLCPP_INFO(get_logger(), "Odometry state: Do not have to update parameters for GPS, already set up.");
+      return true;
+    }
+    if (setPx4Params(gps_px4_params_int_, gps_px4_params_float_)) {
+      last_set_parameters_ = odometry_state_t::gps;
+      return true;
+    }
   } else if (switching_state_ == odometry_state_t::hector) {
-    return setPx4Params(hector_px4_params_int_, hector_px4_params_float_);
+    if (last_set_parameters_ == odometry_state_t::hector) {
+      RCLCPP_INFO(get_logger(), "Odometry state: Do not have to update parameters for HECTOR, already set up.");
+      // Parameters are already set up from before, return right away
+      return true;
+    }
+    if (setPx4Params(hector_px4_params_int_, hector_px4_params_float_)) {
+      last_set_parameters_ = odometry_state_t::hector;
+      return true;
+    }
   } else {
     assert(false);
     RCLCPP_ERROR(get_logger(), "Invalid switching state, this should never happen!");

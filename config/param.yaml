@@ -1,6 +1,6 @@
-odometry_loop_rate: 100.0 # [Hz]
+odometry_loop_rate: 100.0 # [Hz] The main node, publishing local odometry
 gps_loop_rate:      50.0 # [Hz]
-hector_loop_rate:   50.0 # [Hz]
+hector_loop_rate:   50.0 # [Hz] Publishing vision odometry to pixhawk
 
 # px4 # #{
 px4:
