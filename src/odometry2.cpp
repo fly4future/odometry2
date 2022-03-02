@@ -268,6 +268,7 @@ private:
   odometry_state_t     odometry_state_  = odometry_state_t::not_connected;
   odometry_state_t     switching_state_ = odometry_state_t::init;  // State indicating the targeting switch state
   double               odometry_loop_rate_;
+  std::atomic_bool     manual_detected_ = false;
 
   rclcpp::TimerBase::SharedPtr odometry_timer_;
   rclcpp::TimerBase::SharedPtr odometry_diagnostics_timer_;
@@ -285,6 +286,7 @@ private:
   void state_odometry_hector();
   void state_odometry_missing_odometry();
   void state_odometry_waiting_odometry();
+  void state_odometry_manual();
 
   void publishOdometryDiagnostics();
   void publishTF();
@@ -830,6 +832,14 @@ void Odometry2::ControlInterfaceDiagnosticsCallback([[maybe_unused]] const fog_m
     return;
   }
 
+  // Check if manual flight mode
+  if (msg->vehicle_state.state == fog_msgs::msg::ControlInterfaceVehicleState::MANUAL_FLIGHT) {
+    RCLCPP_WARN(get_logger(), "Detected manual flight switch!");
+    manual_detected_ = true;
+  } else {
+    manual_detected_ = false;
+  }
+
   getting_control_interface_diagnostics_ = true;
   RCLCPP_INFO_ONCE(get_logger(), "Getting control diagnostics!");
 }
@@ -959,7 +969,7 @@ void Odometry2::odometryPublisherRoutine() {
     publishTF();
     publishOdometry();
   } else {
-    RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000, "Odometry publisher: Waiting to set the GPS");
+    RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000, "Odometry publisher: Waiting for active estimator");
   }
 }
 //}
@@ -991,6 +1001,9 @@ void Odometry2::update_odometry_state() {
       break;
     case odometry_state_t::waiting_odometry:
       state_odometry_waiting_odometry();
+      break;
+    case odometry_state_t::manual:
+      state_odometry_manual();
       break;
     default:
       assert(false);
@@ -1028,6 +1041,11 @@ void Odometry2::state_odometry_init() {
       last_set_parameters_    = odometry_state_t::gps;
       set_initial_px4_params_ = true;
     } else {
+      if (manual_detected_) {
+        odometry_state_ = odometry_state_t::manual;
+        RCLCPP_WARN(get_logger(), "Odometry state: Switch to manual state.");
+        return;
+      }
       RCLCPP_ERROR(get_logger(), "Odometry state: Fail to set all PX4 parameters. Will repeat in next cycle.");
       return;
     }
@@ -1075,6 +1093,11 @@ void Odometry2::state_odometry_switching() {
     odometry_state_ = switching_state_;
     return;
   } else {
+    if (manual_detected_) {
+      odometry_state_ = odometry_state_t::manual;
+      RCLCPP_WARN(get_logger(), "Odometry state: Switch to manual state.");
+      return;
+    }
     // If update fail, repeat
     RCLCPP_WARN(get_logger(), "Fail to set all PX4 parameters for new estimator. Repeat in next cycle.");
   }
@@ -1132,6 +1155,21 @@ void Odometry2::state_odometry_waiting_odometry() {
   RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000, "Odometry state: Waiting for reliable odometry");
 
   checkEstimatorReliability();
+}
+//}
+
+/* state_odometry_manual//{ */
+// the following mutexes have to be locked by the calling function:
+// odometry_mutex_
+void Odometry2::state_odometry_manual() {
+
+  RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000, "Odometry state: Manual mode");
+
+  if (!manual_detected_) {
+    RCLCPP_WARN(get_logger(), "Odometry state: Manual mode ended, switch to waiting for odometry.");
+    odometry_state_ = odometry_state_t::waiting_odometry;
+    return;
+  }
 }
 //}
 
@@ -2174,6 +2212,11 @@ bool Odometry2::uploadPx4Parameters(const std::shared_ptr<T>& request, const std
     request->param_name = std::get<0>(item);
     request->value      = std::get<1>(item);
     RCLCPP_INFO(get_logger(), "Setting %s, value: %f", std::get<0>(item).c_str(), (float)std::get<1>(item));
+    // Detect if manual mode might be on before sending the parameter update
+    if (manual_detected_) {
+      RCLCPP_WARN(get_logger(), "Manual mode detected, stop setting parameters!");
+      return false;
+    }
     auto future_response = service_client->async_send_request(request);
 
     // If parameter was not set, return false
