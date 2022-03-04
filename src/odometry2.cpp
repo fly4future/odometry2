@@ -5,6 +5,7 @@
 #include <limits>
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp/time.hpp>
+#include <eigen3/Eigen/Core>
 
 #include <tf2/LinearMath/Quaternion.h>
 #include <tf2/convert.h>
@@ -78,6 +79,7 @@ private:
   std::string ned_origin_frame_    = "";
   std::string frd_fcu_frame_       = "";
   std::string fcu_frame_           = "";
+  std::string fcu_untilted_frame_  = "";
   std::string hector_origin_frame_ = "";
   std::string hector_frame_        = "";
 
@@ -342,9 +344,10 @@ private:
   rclcpp::CallbackGroup::SharedPtr callback_group_;
 
   // | --------------------- Utils function --------------------- |
-  bool setPx4Params(const std::vector<px4_int>& params_int, const std::vector<px4_float>& params_float);
-  bool updateEkfParameters();
-  void checkEstimatorReliability();
+  bool   setPx4Params(const std::vector<px4_int>& params_int, const std::vector<px4_float>& params_float);
+  bool   updateEkfParameters();
+  void   checkEstimatorReliability();
+  double getHeading(const geometry_msgs::msg::Quaternion& q);
 
   geometry_msgs::msg::PoseStamped transformBetween(std::string& frame_from, std::string& frame_to);
 
@@ -475,6 +478,7 @@ Odometry2::Odometry2(rclcpp::NodeOptions options) : Node("odometry2", options) {
   utm_origin_frame_    = "utm_origin";                 // ENU frame (East-North-Up)
   local_origin_frame_  = uav_name_ + "/local_origin";  // ENU frame (East-North-Up)
   fcu_frame_           = uav_name_ + "/fcu";           // FLU frame (Front-Left-Up) match also ENU frame (East-North-Up)
+  fcu_untilted_frame_  = uav_name_ + "/fcu_untilted";           // FLU frame (Front-Left-Up) match also ENU frame (East-North-Up)
   frd_fcu_frame_       = uav_name_ + "/frd_fcu";       // FRD frame (Front-Right-Down)
   ned_origin_frame_    = uav_name_ + "/ned_origin";    // NED frame (North-East-Down)
   hector_origin_frame_ = uav_name_ + "/hector_origin";
@@ -1794,8 +1798,8 @@ void Odometry2::publishTF() {
   if (tf_broadcaster_ == nullptr) {
     tf_broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(this->shared_from_this());
   }
-  geometry_msgs::msg::TransformStamped tf;
-  tf2::Quaternion                      q;
+  std::vector<geometry_msgs::msg::TransformStamped> v_transforms;
+  geometry_msgs::msg::TransformStamped              tf;
 
   tf.header.stamp            = this->get_clock()->now();
   tf.header.frame_id         = ned_origin_frame_;
@@ -1807,7 +1811,51 @@ void Odometry2::publishTF() {
   tf.transform.rotation.x    = px4_orientation_[1];
   tf.transform.rotation.y    = px4_orientation_[2];
   tf.transform.rotation.z    = px4_orientation_[3];
-  tf_broadcaster_->sendTransform(tf);
+  v_transforms.push_back(tf);
+
+
+  // Publish transform of fcu_untilted frame
+  tf2::Quaternion                q;
+  double                         heading;
+  geometry_msgs::msg::Quaternion geom_q;
+
+  geom_q.w = px4_orientation_[0];
+  geom_q.x = px4_orientation_[1];
+  geom_q.y = px4_orientation_[2];
+  geom_q.z = px4_orientation_[3];
+
+  heading = getHeading(geom_q);
+
+  // we need to undo the heading
+
+  //TODO: This TF should be between local_origin and ned_origin, not between ned_origin and frd_fcu as px4_orientation is
+  Eigen::Quaterniond quaternion = Eigen::Quaterniond(px4_orientation_[0], px4_orientation_[1], px4_orientation_[2], px4_orientation_[3]);
+  Eigen::Matrix3d    odom_pixhawk_R = quaternion.toRotationMatrix();
+  Eigen::Matrix3d    undo_heading_R = Eigen::Matrix3d(Eigen::AngleAxisd(-heading, Eigen::Vector3d::UnitZ()));
+
+
+  quaternion = Eigen::Quaterniond(undo_heading_R * odom_pixhawk_R);
+
+  q.setX(quaternion.x());
+  q.setY(quaternion.y());
+  q.setZ(quaternion.z());
+  q.setW(quaternion.w());
+
+  q = q.inverse();
+
+  tf.header.stamp            = this->get_clock()->now();
+  tf.header.frame_id         = fcu_frame_;
+  tf.child_frame_id          = fcu_untilted_frame_;
+  tf.transform.translation.x = 0.0;
+  tf.transform.translation.y = 0.0;
+  tf.transform.translation.z = 0.0;
+  tf.transform.rotation.w    = q.getW();
+  tf.transform.rotation.x    = q.getX();
+  tf.transform.rotation.y    = q.getY();
+  tf.transform.rotation.z    = q.getZ();
+  v_transforms.push_back(tf);
+
+  tf_broadcaster_->sendTransform(v_transforms);
 }
 //}
 
@@ -2242,6 +2290,28 @@ bool Odometry2::uploadPx4Parameters(const std::shared_ptr<T>& request, const std
   return true;
 }
 //}
+
+/* getHeading() //{*/
+double Odometry2::getHeading(const geometry_msgs::msg::Quaternion& q) {
+
+  tf2::Quaternion tf2_q;
+  tf2_q.setX(q.x);
+  tf2_q.setY(q.y);
+  tf2_q.setZ(q.z);
+  tf2_q.setW(q.w);
+
+  tf2::Vector3 b1 = tf2::Vector3(1, 0, 0);
+
+  tf2::Vector3 x_new = tf2::Transform(tf2_q) * b1;
+
+  if (fabs(x_new[0]) <= 1e-3 && fabs(x_new[1]) <= 1e-3) {
+    assert("GetHeadingException");
+    RCLCPP_ERROR(get_logger(), "Heading exception");
+  }
+
+  return atan2(x_new[1], x_new[0]);
+}
+/*//}*/
 
 
 /* checkPx4ParamSetOutput //{ */
