@@ -1532,7 +1532,7 @@ void Odometry2::state_hector_not_reliable() {
 
   RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000, "Hector state: Not reliable.");
 
-  std::scoped_lock lock(hector_raw_mutex_);
+  std::scoped_lock lock(hector_raw_mutex_, hector_lat_position_mutex_);
 
   if (checkHectorReliability()) {
     // Calculate the duration of hector reliability
