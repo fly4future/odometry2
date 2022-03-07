@@ -847,7 +847,7 @@ void Odometry2::ControlInterfaceDiagnosticsCallback([[maybe_unused]] const fog_m
 
   // Check if manual flight mode
   if (msg->vehicle_state.state == fog_msgs::msg::ControlInterfaceVehicleState::MANUAL_FLIGHT) {
-    RCLCPP_WARN(get_logger(), "Detected manual flight switch!");
+    RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000, "Detected manual flight switch!");
     manual_detected_ = true;
   } else {
     manual_detected_ = false;
