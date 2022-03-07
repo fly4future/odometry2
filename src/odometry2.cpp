@@ -70,7 +70,7 @@ private:
   // | ----------------- Scope timer parameters ----------------- |
   bool             scope_timer_enable_   = false;
   rclcpp::Duration scope_timer_throttle_ = rclcpp::Duration(std::chrono::seconds(1));
-  rclcpp::Duration scope_timer_min_dur_  = rclcpp::Duration::from_seconds(0.020);
+  rclcpp::Duration scope_timer_min_dur_  = rclcpp::Duration::from_seconds(0.001);
 
   // | ------------------------ TF frames ----------------------- |
   std::string uav_name_            = "";
@@ -380,6 +380,8 @@ Odometry2::Odometry2(rclcpp::NodeOptions options) : Node("odometry2", options) {
   loaded_successfully &= parse_param("odometry_loop_rate", odometry_loop_rate_, *this);
   loaded_successfully &= parse_param("gps_loop_rate", gps_loop_rate_, *this);
   loaded_successfully &= parse_param("hector_loop_rate", hector_loop_rate_, *this);
+  loaded_successfully &= parse_param("print_callback_durations", scope_timer_enable_, *this);
+  loaded_successfully &= parse_param("print_callback_min_dur", scope_timer_min_dur_, *this);
 
   loaded_successfully &= parse_param("gps.active", temp, *this);
   gps_active_.store(temp);
@@ -665,6 +667,9 @@ Odometry2::Odometry2(rclcpp::NodeOptions options) : Node("odometry2", options) {
 
 /* timesyncCallback //{ */
 void Odometry2::timesyncCallback(const px4_msgs::msg::Timesync::UniquePtr msg) {
+
+  scope_timer tim(scope_timer_enable_, "hectorPoseCallback", get_logger(), scope_timer_min_dur_, scope_timer_throttle_);
+
   if (!is_initialized_) {
     return;
   }
@@ -679,6 +684,8 @@ void Odometry2::timesyncCallback(const px4_msgs::msg::Timesync::UniquePtr msg) {
 
 /* hectorPoseCallback //{ */
 void Odometry2::hectorPoseCallback(const geometry_msgs::msg::PoseStamped::UniquePtr msg) {
+
+  scope_timer tim(scope_timer_enable_, "hectorPoseCallback", get_logger(), scope_timer_min_dur_, scope_timer_throttle_);
 
   // If not initialized
   if (!is_initialized_) {
@@ -725,6 +732,8 @@ void Odometry2::hectorPoseCallback(const geometry_msgs::msg::PoseStamped::Unique
 
 /* garminCallback //{ */
 void Odometry2::garminCallback(const px4_msgs::msg::DistanceSensor::UniquePtr msg) {
+
+  scope_timer      tim(scope_timer_enable_, "garminCallback", get_logger(), scope_timer_min_dur_, scope_timer_throttle_);
 
   if (!is_initialized_) {
     return;
@@ -780,6 +789,7 @@ void Odometry2::garminCallback(const px4_msgs::msg::DistanceSensor::UniquePtr ms
 /* pixhawkOdomCallback //{ */
 void Odometry2::pixhawkOdomCallback(const px4_msgs::msg::VehicleOdometry::UniquePtr msg) {
 
+  scope_timer      tim(scope_timer_enable_, "pixhawkOdomCallback", get_logger(), scope_timer_min_dur_, scope_timer_throttle_);
   std::scoped_lock lock(px4_pose_mutex_);
 
   if (!is_initialized_) {
@@ -801,6 +811,8 @@ void Odometry2::pixhawkOdomCallback(const px4_msgs::msg::VehicleOdometry::Unique
 
 /* gpsCallback //{ */
 void Odometry2::gpsCallback(const px4_msgs::msg::VehicleGpsPosition::UniquePtr msg) {
+
+  scope_timer tim(scope_timer_enable_, "gpsCallback", get_logger(), scope_timer_min_dur_, scope_timer_throttle_);
 
   if (!is_initialized_) {
     return;
@@ -830,6 +842,8 @@ void Odometry2::gpsCallback(const px4_msgs::msg::VehicleGpsPosition::UniquePtr m
 
 /* ControlInterfaceDiagnosticsCallback //{ */
 void Odometry2::ControlInterfaceDiagnosticsCallback([[maybe_unused]] const fog_msgs::msg::ControlInterfaceDiagnostics::UniquePtr msg) {
+
+  scope_timer tim(scope_timer_enable_, "ControlInterfaceCallback", get_logger(), scope_timer_min_dur_, scope_timer_throttle_);
 
   // Check if the Control Interface is in the valid state to cooperate with
   if (msg->vehicle_state.state == fog_msgs::msg::ControlInterfaceVehicleState::NOT_CONNECTED ||
@@ -950,7 +964,7 @@ bool Odometry2::resetHectorCallback([[maybe_unused]] const std::shared_ptr<std_s
 
 /* odometryRoutine//{ */
 void Odometry2::odometryRoutine() {
-  scope_timer      tim(scope_timer_enable_, "odometryRoutine", get_logger(), scope_timer_throttle_, scope_timer_min_dur_);
+  scope_timer      tim(scope_timer_enable_, "odometryRoutine", get_logger(), scope_timer_min_dur_, scope_timer_throttle_);
   std::scoped_lock lock(odometry_mutex_);
 
   const auto prev_state = odometry_state_;
@@ -963,7 +977,7 @@ void Odometry2::odometryRoutine() {
 
 /* odometryDiagnosticsRoutine(); //{ */
 void Odometry2::odometryDiagnosticsRoutine() {
-  scope_timer      tim(scope_timer_enable_, "odometryDiagnosticsRoutine", get_logger(), scope_timer_throttle_, scope_timer_min_dur_);
+  scope_timer      tim(scope_timer_enable_, "odometryDiagnosticsRoutine", get_logger(), scope_timer_min_dur_, scope_timer_throttle_);
   std::scoped_lock lock(odometry_mutex_);
 
   // publish some diags
@@ -973,7 +987,7 @@ void Odometry2::odometryDiagnosticsRoutine() {
 
 /* odometryPublisherRoutine(); //{ */
 void Odometry2::odometryPublisherRoutine() {
-  scope_timer      tim(scope_timer_enable_, "odometryPublisherRoutine", get_logger(), scope_timer_throttle_, scope_timer_min_dur_);
+  scope_timer      tim(scope_timer_enable_, "odometryPublisherRoutine", get_logger(), scope_timer_min_dur_, scope_timer_throttle_);
   std::scoped_lock lock(odometry_mutex_, px4_pose_mutex_);
 
   if (odometry_state_ != odometry_state_t::init && odometry_state_ != odometry_state_t::not_connected &&
@@ -1198,7 +1212,7 @@ void Odometry2::state_odometry_manual() {
 
 /* gpsRoutine//{ */
 void Odometry2::gpsRoutine() {
-  scope_timer      tim(scope_timer_enable_, "gpsRoutine", get_logger(), scope_timer_throttle_, scope_timer_min_dur_);
+  scope_timer      tim(scope_timer_enable_, "gpsRoutine", get_logger(), scope_timer_min_dur_, scope_timer_throttle_);
   std::scoped_lock lock(gps_mutex_);
 
   const auto prev_state = gps_state_;
@@ -1210,7 +1224,7 @@ void Odometry2::gpsRoutine() {
 
 /* gpsDiagnosticsRoutine(); //{ */
 void Odometry2::gpsDiagnosticsRoutine() {
-  scope_timer      tim(scope_timer_enable_, "gpsDiagnosticsRoutine", get_logger(), scope_timer_throttle_, scope_timer_min_dur_);
+  scope_timer      tim(scope_timer_enable_, "gpsDiagnosticsRoutine", get_logger(), scope_timer_min_dur_, scope_timer_throttle_);
   std::scoped_lock lock(gps_mutex_);
 
   // publish some diags
@@ -1373,7 +1387,7 @@ void Odometry2::state_gps_restarting() {
 
 /* hectorRoutine//{ */
 void Odometry2::hectorRoutine() {
-  scope_timer      tim(scope_timer_enable_, "hectorRoutine", get_logger(), scope_timer_throttle_, scope_timer_min_dur_);
+  scope_timer      tim(scope_timer_enable_, "hectorRoutine", get_logger(), scope_timer_min_dur_, scope_timer_throttle_);
   std::scoped_lock lock(hector_mutex_);
 
   const auto prev_state = hector_state_;
@@ -1385,7 +1399,7 @@ void Odometry2::hectorRoutine() {
 
 /* hectorDiagnosticsRoutine(); //{ */
 void Odometry2::hectorDiagnosticsRoutine() {
-  scope_timer      tim(scope_timer_enable_, "hectorDiagnosticsRoutine", get_logger(), scope_timer_throttle_, scope_timer_min_dur_);
+  scope_timer      tim(scope_timer_enable_, "hectorDiagnosticsRoutine", get_logger(), scope_timer_min_dur_, scope_timer_throttle_);
   std::scoped_lock lock(hector_mutex_);
 
   // publish some diags
@@ -1517,6 +1531,8 @@ void Odometry2::state_hector_reliable() {
 void Odometry2::state_hector_not_reliable() {
 
   RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000, "Hector state: Not reliable.");
+
+  std::scoped_lock lock(hector_raw_mutex_);
 
   if (checkHectorReliability()) {
     // Calculate the duration of hector reliability
