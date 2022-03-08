@@ -861,7 +861,7 @@ void Odometry2::ControlInterfaceDiagnosticsCallback([[maybe_unused]] const fog_m
 
   // Check if manual flight mode
   if (msg->vehicle_state.state == fog_msgs::msg::ControlInterfaceVehicleState::MANUAL_FLIGHT) {
-    RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000, "Detected manual flight switch!");
+    RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 10000, "Manual flight switch is on!");
     manual_detected_ = true;
   } else {
     manual_detected_ = false;
@@ -990,13 +990,14 @@ void Odometry2::odometryPublisherRoutine() {
   scope_timer      tim(scope_timer_enable_, "odometryPublisherRoutine", get_logger(), scope_timer_min_dur_, scope_timer_throttle_);
   std::scoped_lock lock(odometry_mutex_, px4_pose_mutex_);
 
+  //Check if should publish odometry and tf
   if (odometry_state_ != odometry_state_t::init && odometry_state_ != odometry_state_t::not_connected &&
       odometry_state_ != odometry_state_t::missing_odometry) {
     // publish odometry
     publishTF();
     publishOdometry();
   } else {
-    RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000, "Odometry publisher: Waiting for active estimator");
+    RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000, "Odometry publisher: Waiting for active estimator");
   }
 }
 //}
@@ -1005,6 +1006,11 @@ void Odometry2::odometryPublisherRoutine() {
 // the following mutexes have to be locked by the calling function:
 // odometry_mutex_
 void Odometry2::update_odometry_state() {
+
+  //Check if manual mode was detected
+  if (manual_detected_) {
+   odometry_state_ = odometry_state_t::manual;
+  }
 
   // process the vehicle's state
   switch (odometry_state_) {
