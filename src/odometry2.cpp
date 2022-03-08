@@ -1229,11 +1229,11 @@ void Odometry2::gpsRoutine() {
 //}
 
 /* gpsDiagnosticsRoutine(); //{ */
+// the following mutexes have to be locked by the calling function:
+// gps_mutex_
 void Odometry2::gpsDiagnosticsRoutine() {
   scope_timer      tim(scope_timer_enable_, "gpsDiagnosticsRoutine", get_logger(), scope_timer_min_dur_, scope_timer_throttle_);
-  std::scoped_lock lock(gps_mutex_);
 
-  // publish some diags
   publishGpsDiagnostics();
 }
 //}
@@ -1404,11 +1404,11 @@ void Odometry2::hectorRoutine() {
 //}
 
 /* hectorDiagnosticsRoutine(); //{ */
+// the following mutexes have to be locked by the calling function:
+// hector_mutex_
 void Odometry2::hectorDiagnosticsRoutine() {
   scope_timer      tim(scope_timer_enable_, "hectorDiagnosticsRoutine", get_logger(), scope_timer_min_dur_, scope_timer_throttle_);
-  std::scoped_lock lock(hector_mutex_);
 
-  // publish some diags
   publishHectorDiagnostics();
 }
 //}
@@ -1653,6 +1653,8 @@ void Odometry2::state_hector_restarting() {
 // hector_raw_mutex_
 bool Odometry2::checkHectorReliability() {
 
+  scope_timer tim(scope_timer_enable_, "checkHectorReliability", get_logger(), scope_timer_min_dur_, scope_timer_throttle_);
+
   // Check hector message interval//{
   std::chrono::duration<double> dt = std::chrono::system_clock::now() - hector_last_msg_time_;
 
@@ -1697,6 +1699,8 @@ bool Odometry2::checkHectorReliability() {
 // gps_raw_mutex_
 // gps_mutex_
 bool Odometry2::checkGpsReliability() {
+
+  scope_timer tim(scope_timer_enable_, "checkGpsReliability", get_logger(), scope_timer_min_dur_, scope_timer_throttle_);
 
   // Check gps message interval//{
   std::chrono::duration<double> dt = std::chrono::system_clock::now() - gps_last_msg_time_;
@@ -1817,6 +1821,8 @@ void Odometry2::publishGpsOdometry() {
 // px4_pose_mutex_
 void Odometry2::publishTF() {
 
+  scope_timer tim(scope_timer_enable_, "publishTF", get_logger(), scope_timer_min_dur_, scope_timer_throttle_);
+
   if (tf_broadcaster_ == nullptr) {
     tf_broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(this->shared_from_this());
   }
@@ -1892,6 +1898,8 @@ void Odometry2::publishTF() {
 // the following mutexes have to be locked by the calling function:
 // px4_pose_mutex_
 void Odometry2::publishOdometry() {
+
+  scope_timer tim(scope_timer_enable_, "publishOdometry", get_logger(), scope_timer_min_dur_, scope_timer_throttle_);
 
   // frd -> flu (enu) is rotation 180 degrees around x
   tf2::Quaternion q_orig, q_rot, q_new;
