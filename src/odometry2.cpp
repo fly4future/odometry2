@@ -733,7 +733,7 @@ void Odometry2::hectorPoseCallback(const geometry_msgs::msg::PoseStamped::Unique
 /* garminCallback //{ */
 void Odometry2::garminCallback(const px4_msgs::msg::DistanceSensor::UniquePtr msg) {
 
-  scope_timer      tim(scope_timer_enable_, "garminCallback", get_logger(), scope_timer_min_dur_, scope_timer_throttle_);
+  scope_timer tim(scope_timer_enable_, "garminCallback", get_logger(), scope_timer_min_dur_, scope_timer_throttle_);
 
   if (!is_initialized_) {
     return;
@@ -990,7 +990,7 @@ void Odometry2::odometryPublisherRoutine() {
   scope_timer      tim(scope_timer_enable_, "odometryPublisherRoutine", get_logger(), scope_timer_min_dur_, scope_timer_throttle_);
   std::scoped_lock lock(odometry_mutex_, px4_pose_mutex_);
 
-  //Check if should publish odometry and tf
+  // Check if should publish odometry and tf
   if (odometry_state_ != odometry_state_t::init && odometry_state_ != odometry_state_t::not_connected &&
       odometry_state_ != odometry_state_t::missing_odometry) {
     // publish odometry
@@ -1007,9 +1007,9 @@ void Odometry2::odometryPublisherRoutine() {
 // odometry_mutex_
 void Odometry2::update_odometry_state() {
 
-  //Check if manual mode was detected
+  // Check if manual mode was detected
   if (manual_detected_) {
-   odometry_state_ = odometry_state_t::manual;
+    odometry_state_ = odometry_state_t::manual;
   }
 
   // process the vehicle's state
@@ -1070,7 +1070,7 @@ void Odometry2::state_odometry_init() {
   // Set and handle initial PX4 parameters setting
   if (!set_initial_px4_params_) {
     RCLCPP_INFO(get_logger(), "Odometry state: Setting initial PX4 parameters for GPS.");
-    if (setPx4Params(gps_px4_params_int_, gps_px4_params_float_)) {
+    if (setPx4Params(gps_px4_params_int_, hector_px4_params_float_)) {
       last_set_parameters_    = odometry_state_t::gps;
       set_initial_px4_params_ = true;
     } else {
@@ -1232,7 +1232,7 @@ void Odometry2::gpsRoutine() {
 // the following mutexes have to be locked by the calling function:
 // gps_mutex_
 void Odometry2::gpsDiagnosticsRoutine() {
-  scope_timer      tim(scope_timer_enable_, "gpsDiagnosticsRoutine", get_logger(), scope_timer_min_dur_, scope_timer_throttle_);
+  scope_timer tim(scope_timer_enable_, "gpsDiagnosticsRoutine", get_logger(), scope_timer_min_dur_, scope_timer_throttle_);
 
   publishGpsDiagnostics();
 }
@@ -1407,7 +1407,7 @@ void Odometry2::hectorRoutine() {
 // the following mutexes have to be locked by the calling function:
 // hector_mutex_
 void Odometry2::hectorDiagnosticsRoutine() {
-  scope_timer      tim(scope_timer_enable_, "hectorDiagnosticsRoutine", get_logger(), scope_timer_min_dur_, scope_timer_throttle_);
+  scope_timer tim(scope_timer_enable_, "hectorDiagnosticsRoutine", get_logger(), scope_timer_min_dur_, scope_timer_throttle_);
 
   publishHectorDiagnostics();
 }
@@ -2253,7 +2253,8 @@ bool Odometry2::updateEkfParameters() {
       RCLCPP_INFO(get_logger(), "Odometry state: Do not have to update parameters for GPS, already set up.");
       return true;
     }
-    if (setPx4Params(gps_px4_params_int_, gps_px4_params_float_)) {
+    std::vector<px4_float> temp;
+    if (setPx4Params(gps_px4_params_int_, temp)) {
       last_set_parameters_ = odometry_state_t::gps;
       return true;
     }
@@ -2263,7 +2264,8 @@ bool Odometry2::updateEkfParameters() {
       // Parameters are already set up from before, return right away
       return true;
     }
-    if (setPx4Params(hector_px4_params_int_, hector_px4_params_float_)) {
+    std::vector<px4_float> temp;
+    if (setPx4Params(hector_px4_params_int_, temp)) {
       last_set_parameters_ = odometry_state_t::hector;
       return true;
     }
