@@ -96,6 +96,7 @@ private:
   std::vector<px4_int>   hector_px4_params_int_;
   std::vector<px4_float> hector_px4_params_float_;
   std::vector<px4_int>   gps_px4_params_int_;
+  std::vector<px4_int>   gps_px4_params_int_change_;
   std::vector<px4_float> gps_px4_params_float_;
   std::atomic_bool       set_initial_px4_params_                = false;
   std::atomic_bool       getting_px4_utm_position_              = false;
@@ -414,12 +415,12 @@ Odometry2::Odometry2(rclcpp::NodeOptions options) : Node("odometry2", options) {
   /*Hector px params loading//{*/
   loaded_successfully &= parse_param("px4.hector.EKF2_AID_MASK", param_int, *this);
   hector_px4_params_int_.push_back(px4_int("EKF2_AID_MASK", param_int));
-  loaded_successfully &= parse_param("px4.hector.EKF2_EV_NOISE_MD", param_int, *this);
-  hector_px4_params_int_.push_back(px4_int("EKF2_EV_NOISE_MD", param_int));
+  /* loaded_successfully &= parse_param("px4.hector.EKF2_EV_NOISE_MD", param_int, *this); */
+  /* hector_px4_params_int_.push_back(px4_int("EKF2_EV_NOISE_MD", param_int)); */
   loaded_successfully &= parse_param("px4.hector.EKF2_RNG_AID", param_int, *this);
-  hector_px4_params_int_.push_back(px4_int("EKF2_RNG_AID", param_int));
+  /* hector_px4_params_int_.push_back(px4_int("EKF2_RNG_AID", param_int)); */
   loaded_successfully &= parse_param("px4.hector.EKF2_HGT_MODE", param_int, *this);
-  hector_px4_params_int_.push_back(px4_int("EKF2_HGT_MODE", param_int));
+  /* hector_px4_params_int_.push_back(px4_int("EKF2_HGT_MODE", param_int)); */
 
   loaded_successfully &= parse_param("px4.hector.EKF2_EV_DELAY", param_float, *this);
   hector_px4_params_float_.push_back(px4_float("EKF2_EV_DELAY", param_float));
@@ -450,10 +451,13 @@ Odometry2::Odometry2(rclcpp::NodeOptions options) : Node("odometry2", options) {
   /*GPS px params loading//{*/
   loaded_successfully &= parse_param("px4.gps.EKF2_AID_MASK", param_int, *this);
   gps_px4_params_int_.push_back(px4_int("EKF2_AID_MASK", param_int));
+  gps_px4_params_int_change_.push_back(px4_int("EKF2_AID_MASK", param_int));
   loaded_successfully &= parse_param("px4.gps.EKF2_RNG_AID", param_int, *this);
   gps_px4_params_int_.push_back(px4_int("EKF2_RNG_AID", param_int));
   loaded_successfully &= parse_param("px4.gps.EKF2_HGT_MODE", param_int, *this);
   gps_px4_params_int_.push_back(px4_int("EKF2_HGT_MODE", param_int));
+  loaded_successfully &= parse_param("px4.hector.EKF2_EV_NOISE_MD", param_int, *this);
+  gps_px4_params_int_.push_back(px4_int("EKF2_EV_NOISE_MD", param_int));
 
   loaded_successfully &= parse_param("px4.gps.EKF2_RNG_A_HMAX", param_float, *this);
   gps_px4_params_float_.push_back(px4_float("EKF2_RNG_A_HMAX", param_float));
@@ -2254,7 +2258,7 @@ bool Odometry2::updateEkfParameters() {
       return true;
     }
     std::vector<px4_float> temp;
-    if (setPx4Params(gps_px4_params_int_, temp)) {
+    if (setPx4Params(gps_px4_params_int_change_, temp)) {
       last_set_parameters_ = odometry_state_t::gps;
       return true;
     }
