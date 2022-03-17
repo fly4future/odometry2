@@ -1,6 +1,6 @@
 odometry_loop_rate: 100.0 # [Hz] The main node, publishing local odometry
 gps_loop_rate:      50.0 # [Hz]
-hector_loop_rate:   50.0 # [Hz] Publishing vision odometry to pixhawk
+hector_loop_rate:   20.0 # [Hz] Publishing vision odometry to pixhawk
 print_callback_durations: true # for debugging purposes
 print_callback_min_dur: 0.002 # [s] shorter callback durations than this will be ignored and not printed
 
@@ -27,7 +27,7 @@ px4:
     EKF2_HGT_MODE:    3 # Default source of height estimation - will be changed according to gps and rangefinder reliability
 
     MPC_XY_CRUISE:    1.0 # Max speed for mission mode [ms-1]
-    MC_YAWRATE_MAX:   20.0 # Max yaw rate [degs-1]
+    MC_YAWRATE_MAX:   200.0 # Max yaw rate [degs-1]
     MPC_ACC_HOR:      0.5 # Acceleration for horizontal movement [ms-2]
     MPC_ACC_HOR_MAX:  0.5 # Max acceleration for horizontal movement [ms-2]
     MPC_JERK_AUTO:    3.0 # Change of the acceleration [ms-3]
