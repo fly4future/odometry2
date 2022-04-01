@@ -175,7 +175,7 @@ private:
   int                           c_garmin_init_msgs_         = 0;
   float                         garmin_offset_              = 0;
   std::vector<float>            garmin_init_values_;
-  std::unique_ptr<MedianFilter> alt_mf_garmin_;
+  fog_lib::MedianFilter         alt_mf_garmin_;
   double                        _garmin_min_valid_alt_;
   double                        _garmin_max_valid_alt_;
 
@@ -534,7 +534,7 @@ Odometry2::Odometry2(rclcpp::NodeOptions options) : Node("odometry2", options) {
   loaded_successfully &= parse_param("altitude.median_filter.garmin.buffer_size", buffer_size, *this);
   loaded_successfully &= parse_param("altitude.median_filter.garmin.max_diff", max_diff, *this);
 
-  alt_mf_garmin_ = std::make_unique<MedianFilter>(buffer_size, max_valid, min_valid, max_diff, *this);
+  alt_mf_garmin_ = MedianFilter(buffer_size, max_valid, min_valid, max_diff);
 
   //}
 
@@ -767,7 +767,7 @@ void Odometry2::garminCallback(const px4_msgs::msg::DistanceSensor::UniquePtr ms
   }
 
   // Gather offset amount of msgs
-  if (garmin_init_values_.size() < garmin_num_avg_offset_msgs_) {
+  if ((int)garmin_init_values_.size() < garmin_num_avg_offset_msgs_) {
     garmin_init_values_.push_back(measurement);
     return;
   }
@@ -779,7 +779,7 @@ void Odometry2::garminCallback(const px4_msgs::msg::DistanceSensor::UniquePtr ms
   }
 
   // do not fuse garmin measurements when a height jump is detected - most likely the UAV is flying above an obstacle
-  if (!alt_mf_garmin_->isValid(measurement, *this)) {
+  if (!alt_mf_garmin_.add(measurement)) {
     RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000, "[%s]: Garmin measurement %f declined by median filter.", this->get_name(), measurement);
     return;
   }
