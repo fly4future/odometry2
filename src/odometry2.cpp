@@ -779,7 +779,7 @@ void Odometry2::garminCallback(const px4_msgs::msg::DistanceSensor::UniquePtr ms
   }
 
   // do not fuse garmin measurements when a height jump is detected - most likely the UAV is flying above an obstacle
-  if (!alt_mf_garmin_.add(measurement)) {
+  if (!alt_mf_garmin_.addCheck(measurement)) {
     RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000, "[%s]: Garmin measurement %f declined by median filter.", this->get_name(), measurement);
     return;
   }
