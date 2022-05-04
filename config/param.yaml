@@ -1,21 +1,21 @@
 odometry_loop_rate: 100.0 # [Hz] The main node, publishing local odometry
 gps_loop_rate:      50.0 # [Hz]
-hector_loop_rate:   50.0 # [Hz] Publishing vision odometry to pixhawk
+hector_loop_rate:   20.0 # [Hz] Publishing vision odometry to pixhawk
 print_callback_durations: true # for debugging purposes
 print_callback_min_dur: 0.002 # [s] shorter callback durations than this will be ignored and not printed
 
-
 # px4 # #{
 px4:
-  param_set_timeout:  1 # Minimal value is 1. If zero, the parameter will never be set [s]
+  parameter_set_timeout:  1 # Minimal value is 1. If zero, the parameter will never be set [s]
+  parameter_change: false # DO NOT CHANGE, DEBUG_PARAMETER - allow to change PX4 parameters
 
   # hector # #{
   hector:
-    EKF2_AID_MASK:      328 # EV_POS + EV_VEL + ROTATE_EV
-    EKF2_EV_DELAY:      10.0 # hector measurements delay [ms-1]
+    EKF2_AID_MASK:      9 # GPS + EV_POS
+    EKF2_EV_DELAY:      20.0 # hector measurements delay [ms-1]
     EKF2_EV_NOISE_MD:   1 # use px4 covariances
-    EKF2_EVP_NOISE:     0.05 # position measurement covariance [m]
-    EKF2_EVV_NOISE:     0.05 # velocity measurement covariance [ms-1]
+    EKF2_EVP_NOISE:     0.1 # position measurement covariance [m]
+    EKF2_EVV_NOISE:     0.3 # velocity measurement covariance [ms-1]
 
     EKF2_RNG_AID:     1 # Using the range sensor for height fusion if specific conditions are met
     EKF2_RNG_A_HMAX:  5.0 # Max height to use ranger for fusion in aid mode
@@ -25,10 +25,10 @@ px4:
     # 1 - only gps,
     # 2 - rangefinder height mode
     # 3 - vision odometry mode
-    EKF2_HGT_MODE:    3 # Default source of height estimation - will be changed according to gps and rangefinder reliability
+    EKF2_HGT_MODE:    0 # Default source of height estimation - will be changed according to gps and rangefinder reliability
 
     MPC_XY_CRUISE:    1.0 # Max speed for mission mode [ms-1]
-    MC_YAWRATE_MAX:   20.0 # Max yaw rate [degs-1]
+    MC_YAWRATE_MAX:   200.0 # Max yaw rate [degs-1]
     MPC_ACC_HOR:      0.5 # Acceleration for horizontal movement [ms-2]
     MPC_ACC_HOR_MAX:  0.5 # Max acceleration for horizontal movement [ms-2]
     MPC_JERK_AUTO:    3.0 # Change of the acceleration [ms-3]
@@ -39,7 +39,7 @@ px4:
 
   # gps # #{
   gps:
-    EKF2_AID_MASK:    1 # GPS
+    EKF2_AID_MASK:    9 # GPS
 
     EKF2_RNG_AID:     1 # Using the range sensor for height fusion if specific conditions are met
     EKF2_RNG_A_HMAX:  5.0 # Max height to use ranger for fusion in aid mode
@@ -49,7 +49,7 @@ px4:
     # 1 - only gps,
     # 2 - rangefinder height mode
     # 3 - vision odometry mode
-    EKF2_HGT_MODE:    2 # Default source of height estimation - will be changed according to gps and rangefinder reliability
+    EKF2_HGT_MODE:    0 # Default source of height estimation - will be changed according to gps and rangefinder reliability
 
     MPC_XY_CRUISE:    5.0 # Max speed for mission mode [ms-1]
     MC_YAWRATE_MAX:   200.0 # Max yaw rate [degs-1]
@@ -67,9 +67,9 @@ px4:
 gps:
     active: true
     num_init_msgs:  5 # number of messages to skip before using gps
-    eph_max:        2.0 # max deviation allowed to use gps source [m]
+    eph_max:        2.5 # max deviation allowed to use gps source [m]
     msg_good:       5 # number of messages to confirm good gps
-    msg_err:        5 # number of messages to confirm bad gps
+    msg_err:        0 # number of messages to confirm bad gps
     msg_interval_max: 2.0 # max interval between messages before not reliable gps [s]
     msg_interval_warn: 1.0 # interval between messages that gives warning [s]
 # # #}
@@ -80,8 +80,8 @@ hector:
     num_init_msgs:      10 # number of messages to skip before using hector messages
     msg_interval_warn:  0.5 # interval between messages that gives warning [s]
     msg_interval_max:   0.8 # max interval between messages before not reliable hector [s]
-    max_velocity:       2.0 # max velocity of the hector estimator to believe hector [ms-1]
-    max_position_jump:  1.0 # max position difference between consequent hector poses. 4 is default [m]
+    max_velocity:       10.0 # max velocity of the hector estimator to believe hector [ms-1]
+    max_position_jump:  2.0 # max position difference between consequent hector poses. 4 is default [m]
     reset_wait:         10.0 # wait time until the next hector reset attempt [s]
     reliable_time_limit: 2.0 # wait time until the hector is reset if messages are not reliable [s]
     reset_response_wait: 3 # wait time for hector response [s]

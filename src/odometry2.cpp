@@ -103,24 +103,24 @@ private:
   std::atomic_bool       getting_control_interface_diagnostics_ = false;
   std::atomic_bool       getting_pixhawk_odometry_              = false;
   int                    px4_param_set_timeout_                 = 0;
+  bool                   px4_param_change_                      = true;
 
-  float      px4_position_[3];
-  float      px4_orientation_[4];
-  std::mutex px4_pose_mutex_;
+  float                px4_position_[3];
+  float                px4_orientation_[4];
+  std::recursive_mutex px4_pose_mutex_;
 
   int ekf_default_hgt_mode_ = 0;
 
   // | -------------------- PX home position -------------------- |
-  double           px4_utm_position_[2];
-  std::atomic_bool republish_static_tf_ = false;
-  std::mutex       px4_utm_position_mutex_;
+  double               px4_utm_position_[2];
+  std::atomic_bool     republish_static_tf_ = false;
+  std::recursive_mutex px4_utm_position_mutex_;
 
   // | --------------------- GPS parameters --------------------- |
-  std::atomic_bool gps_active_  = false;
-  std::atomic_bool getting_gps_ = false;
-  std::mutex       gps_raw_mutex_;
-  float            gps_eph_;
-  /* float            pos_gps_offset_[2]; */
+  std::atomic_bool     gps_active_  = false;
+  std::atomic_bool     getting_gps_ = false;
+  std::recursive_mutex gps_raw_mutex_;
+  float                gps_eph_;
 
   int   c_gps_init_msgs_       = 0;
   float gps_eph_max_           = 0;
@@ -136,9 +136,9 @@ private:
   std::chrono::time_point<std::chrono::system_clock> gps_last_processed_msg_time_ = std::chrono::system_clock::now();
 
   // | -------------------- Hector parameters ------------------- |
-  std::atomic_bool getting_hector_ = false;
-  std::atomic_bool hector_active_  = false;
-  std::mutex       hector_raw_mutex_;
+  std::atomic_bool     getting_hector_ = false;
+  std::atomic_bool     hector_active_  = false;
+  std::recursive_mutex hector_raw_mutex_;
 
   int    c_hector_init_msgs_         = 0;
   int    hector_num_init_msgs_       = 0;
@@ -151,24 +151,25 @@ private:
   float  hector_max_position_jump_   = 0.0;
   float  hector_max_velocity_        = 0.0;
 
-  float            hector_position_[3];
-  float            hector_velocity_[3];
-  float            hector_position_raw_prev_[2];
-  float            hector_position_raw_[2];
-  float            hector_orientation_[4];
-  float            pos_orig_hector_[3];
-  float            ori_orig_hector_[4];
-  std::atomic_bool hector_tf_setup_ = false;
-  std::atomic_bool published_hector = false;
+  float hector_position_[3];
+  float hector_velocity_[3];
+  float hector_position_raw_prev_[2];
+  float hector_position_raw_[2];
+  float hector_orientation_[4];
+  float pos_orig_hector_[3];
+  float ori_orig_hector_[4];
+  /* float            hector_switch_correction_[2]; */
+  std::atomic_bool hector_tf_setup_          = false;
+  std::atomic_bool hector_allow_px4_publish_ = false;
 
   std::chrono::time_point<std::chrono::system_clock> hector_reset_called_time_ = std::chrono::system_clock::now();  // Last hector reset time
   std::chrono::time_point<std::chrono::system_clock> hector_last_msg_time_;
   std::chrono::time_point<std::chrono::system_clock> hector_reliable_time_;
 
   // | ------------------------- Garmin ------------------------- |
-  std::atomic_bool getting_garmin_ = false;
-  std::mutex       garmin_mutex_;
-  double           garmin_measurement_;
+  std::atomic_bool     getting_garmin_ = false;
+  std::recursive_mutex garmin_mutex_;
+  double               garmin_measurement_;
 
   int                           garmin_num_init_msgs_       = 0;
   int                           garmin_num_avg_offset_msgs_ = 0;
@@ -183,13 +184,13 @@ private:
   unsigned long long                                          timestamp_;
   std::int64_t                                                timestamp_raw_;
   std::chrono::time_point<std::chrono::high_resolution_clock> time_sync_time_;
-  std::mutex                                                  timestamp_mutex_;
+  std::recursive_mutex                                        timestamp_mutex_;
 
   // | -------------------- Lateral estimator ------------------- |
 
   std::chrono::time_point<std::chrono::high_resolution_clock> time_odometry_timer_prev_;
   std::atomic_bool                                            time_odometry_timer_set_ = false;
-  std::mutex                                                  hector_lat_estimator_mutex_, hector_lat_position_mutex_;
+  std::recursive_mutex                                        hector_lat_estimator_mutex_, hector_lat_position_mutex_;
 
   std::shared_ptr<LateralEstimator> hector_lat_estimator_;
   std::vector<lat_R_t>              R_lat_vec_;
@@ -259,6 +260,7 @@ private:
   // --------------------------------------------------------------
   bool checkHectorReliability();
   bool checkGpsReliability();
+  bool checkGpsTime();
   bool isValidType(const fog_msgs::msg::OdometryType& type);
   bool isValidGate(const double& value, const double& min_value, const double& max_value, const std::string& value_name);
 
@@ -407,7 +409,8 @@ Odometry2::Odometry2(rclcpp::NodeOptions options) : Node("odometry2", options) {
   loaded_successfully &= parse_param("altitude.avg_offset_msgs", garmin_num_avg_offset_msgs_, *this);
   loaded_successfully &= parse_param("altitude.num_init_msgs", garmin_num_init_msgs_, *this);
 
-  loaded_successfully &= parse_param("px4.param_set_timeout", px4_param_set_timeout_, *this);
+  loaded_successfully &= parse_param("px4.parameter_set_timeout", px4_param_set_timeout_, *this);
+  loaded_successfully &= parse_param("px4.parameter_change", px4_param_change_, *this);
 
   int   param_int;
   float param_float;
@@ -1148,6 +1151,11 @@ void Odometry2::state_odometry_gps() {
 
   RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000, "Odometry state: GPS");
 
+  // Allow publishing odometry into px4
+  if (hector_allow_px4_publish_) {
+    hector_allow_px4_publish_ = false;
+  }
+
   checkEstimatorReliability();
 }
 //}
@@ -1158,6 +1166,11 @@ void Odometry2::state_odometry_gps() {
 void Odometry2::state_odometry_hector() {
 
   RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000, "Odometry state: Hector");
+
+  // Allow publishing odometry into px4
+  if (!hector_allow_px4_publish_) {
+    hector_allow_px4_publish_ = true;
+  }
 
   checkEstimatorReliability();
 }
@@ -1307,10 +1320,7 @@ void Odometry2::state_gps_reliable() {
 
   std::scoped_lock lock(gps_raw_mutex_, px4_pose_mutex_);
 
-  // Check if new GPS message has arrived
-  if (gps_last_processed_msg_time_ != gps_last_msg_time_) {
-    gps_last_processed_msg_time_ = gps_last_msg_time_;
-    // Check gps reliability
+  if (checkGpsTime()) {
     if (!checkGpsReliability()) {
       gps_state_ = estimator_state_t::not_reliable;
       return;
@@ -1330,10 +1340,7 @@ void Odometry2::state_gps_not_reliable() {
 
   RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000, "GPS state: Not reliable.");
 
-  // Check if new GPS message has arrived
-  if (gps_last_processed_msg_time_ != gps_last_msg_time_) {
-    gps_last_processed_msg_time_ = gps_last_msg_time_;
-    // Check gps reliability
+  if (checkGpsTime()) {
     if (checkGpsReliability()) {
       gps_state_ = estimator_state_t::reliable;
       return;
@@ -1706,19 +1713,6 @@ bool Odometry2::checkGpsReliability() {
 
   scope_timer tim(scope_timer_enable_, "checkGpsReliability", get_logger(), scope_timer_min_dur_, scope_timer_throttle_);
 
-  // Check gps message interval//{
-  std::chrono::duration<double> dt = std::chrono::system_clock::now() - gps_last_msg_time_;
-
-  if (dt.count() > gps_msg_interval_warn_) {
-    RCLCPP_WARN(get_logger(), "GPS message not received for %f seconds.", dt.count());
-    if (dt.count() > gps_msg_interval_max_) {
-      RCLCPP_WARN(get_logger(), "GPS message not received for %f seconds. Not reliable.", dt.count());
-      /* gps_eph_ = std::numeric_limits<float>::max();  // Set value to max in case GPS stop publishing */
-      return false;
-    }
-  }
-  /*//}*/
-
   /* Check gps quality//{*/
   if (gps_state_ == estimator_state_t::reliable) {
 
@@ -1739,7 +1733,7 @@ bool Odometry2::checkGpsReliability() {
   }
   /*//}*/
 
-  // GPS quality is getting better
+  /*GPS quality is getting better//{*/
   if (gps_state_ == estimator_state_t::not_reliable) {
     if (gps_eph_ < gps_eph_max_) {
       if (c_gps_eph_good_++ >= gps_msg_good_) {
@@ -1757,6 +1751,43 @@ bool Odometry2::checkGpsReliability() {
       return false;
     }
   }
+  /*//}*/
+
+  assert(false);
+  RCLCPP_ERROR(get_logger(), "This should not happen.");
+} /*//}*
+
+/* checkGpsTime //{*/
+// the following mutexes have to be locked by the calling function:
+// gps_raw_mutex_
+// gps_mutex_
+bool Odometry2::checkGpsTime() {
+
+  scope_timer tim(scope_timer_enable_, "checkGpsTime", get_logger(), scope_timer_min_dur_, scope_timer_throttle_);
+
+  // Check gps message interval//{
+  std::chrono::duration<double> dt = std::chrono::system_clock::now() - gps_last_msg_time_;
+
+  if (dt.count() > gps_msg_interval_warn_) {
+    RCLCPP_WARN(get_logger(), "GPS message not received for %f seconds.", dt.count());
+    if (dt.count() > gps_msg_interval_max_) {
+      RCLCPP_WARN(get_logger(), "GPS message not received for %f seconds. Not reliable.", dt.count());
+      /* gps_eph_ = std::numeric_limits<float>::max();  // Set value to max in case GPS stop publishing */
+      return false;
+    }
+  }
+  /*//}*/
+
+  // Check if new GPS message has arrived//{
+  if (gps_last_processed_msg_time_ != gps_last_msg_time_) {
+    gps_last_processed_msg_time_ = gps_last_msg_time_;
+    return true;
+  } else {
+    // Still the old message.
+    return false;
+  }
+  /*//}*/
+
   assert(false);
   RCLCPP_ERROR(get_logger(), "This should not happen.");
 } /*//}*
@@ -2031,14 +2062,16 @@ void Odometry2::publishHectorOdometry() {
 
   hector_odometry_msg.x = hector_pos_tf.point.x;
   hector_odometry_msg.y = hector_pos_tf.point.y;
-  /* hector_odometry_msg.x = hector_pos_tf.point.x - px4_position_[0]; // Correcting hector position to the GPS position in case of the switch TODO: do not use
-   * position but rather get tf and use the value from it - do not need to lock mutex */
-  /* hector_odometry_msg.y = hector_pos_tf.point.y - px4_position_[1]; */
+  /* hector_odometry_msg.x = hector_pos_tf.point.x - hector_switch_correction_[0]; */
+  /* hector_odometry_msg.y = hector_pos_tf.point.y - hector_switch_correction_[1]; */
   hector_odometry_msg.z = hector_pos_tf.point.z;
 
   hector_odometry_msg.vx = hector_vel_tf.vector.x;
   hector_odometry_msg.vy = hector_vel_tf.vector.y;
   hector_odometry_msg.vz = hector_vel_tf.vector.z;
+  /* hector_odometry_msg.vx = NAN; */
+  /* hector_odometry_msg.vy = NAN; */
+  /* hector_odometry_msg.vz = NAN; */
 
   hector_odometry_msg.rollspeed  = NAN;
   hector_odometry_msg.pitchspeed = NAN;
@@ -2072,7 +2105,6 @@ void Odometry2::publishHectorOdometry() {
 
   // Publishing
   pixhawk_hector_publisher_->publish(odom_msg);
-  hector_odometry_publisher_->publish(hector_odometry_msg);
 
   // Publish hector in the correct RVIZ orientation visualization
   nav_msgs::msg::Odometry rviz_msg;
@@ -2091,6 +2123,18 @@ void Odometry2::publishHectorOdometry() {
   rviz_msg.pose.pose.orientation.z = tf.pose.orientation.z;
 
   local_hector_publisher_->publish(rviz_msg);
+
+  if (hector_allow_px4_publish_) {
+    hector_odometry_publisher_->publish(hector_odometry_msg);
+  }
+  // Publish hector only if we want to use hector
+  // TODO:: Proc tohle blokuje? Nevidim ten duvod
+  /* { */
+  /*   std::scoped_lock lock(odometry_mutex_); */
+  /*   if (odometry_state_ == odometry_state_t::hector) { */
+  /*     hector_odometry_publisher_->publish(hector_odometry_msg); */
+  /*   } */
+  /* } */
 }
 //}
 
@@ -2302,6 +2346,11 @@ geometry_msgs::msg::PoseStamped Odometry2::transformBetween(std::string& frame_f
 
 /*setPx4Params//{*/
 bool Odometry2::setPx4Params(const std::vector<px4_int>& params_int, const std::vector<px4_float>& params_float) {
+
+  if (!px4_param_change_) {
+    RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000, "PX4 parameter change is switched off");
+    return true;
+  }
 
   if (!uploadPx4Parameters(std::make_shared<fog_msgs::srv::SetPx4ParamInt::Request>(), params_int, set_px4_param_int_) ||
       !uploadPx4Parameters(std::make_shared<fog_msgs::srv::SetPx4ParamFloat::Request>(), params_float, set_px4_param_float_)) {
