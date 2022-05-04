@@ -537,7 +537,7 @@ Odometry2::Odometry2(rclcpp::NodeOptions options) : Node("odometry2", options) {
   loaded_successfully &= parse_param("altitude.median_filter.garmin.buffer_size", buffer_size, *this);
   loaded_successfully &= parse_param("altitude.median_filter.garmin.max_diff", max_diff, *this);
 
-  alt_mf_garmin_ = MedianFilter(buffer_size, max_valid, min_valid, max_diff);
+  alt_mf_garmin_ = MedianFilter(buffer_size, min_valid, max_valid, max_diff);
 
   //}
 
