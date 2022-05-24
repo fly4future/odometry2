@@ -93,17 +93,18 @@ private:
 
   // | ---------------------- PX parameters --------------------- |
   odometry_state_t       last_set_parameters_ = odometry_state_t::init;
-  std::vector<px4_int>   hector_px4_params_int_;
+  std::vector<px4_int>   init_px4_params_int_;
+  std::vector<px4_float> init_px4_params_float_;
   std::vector<px4_float> hector_px4_params_float_;
-  std::vector<px4_int>   gps_px4_params_int_;
-  std::vector<px4_int>   gps_px4_params_int_change_;
   std::vector<px4_float> gps_px4_params_float_;
+  std::atomic_bool       check_initial_px4_params_              = true;
   std::atomic_bool       set_initial_px4_params_                = false;
   std::atomic_bool       getting_px4_utm_position_              = false;
   std::atomic_bool       getting_control_interface_diagnostics_ = false;
   std::atomic_bool       getting_pixhawk_odometry_              = false;
-  int                    px4_param_set_timeout_                 = 0;
-  bool                   px4_param_change_                      = true;
+  std::atomic_bool       px4_param_restart_required_            = false;
+  int                    px4_param_handle_timeout_              = 0;
+  float                  px4_param_check_value_                 = 0.0;
 
   float                px4_position_[3];
   float                px4_orientation_[4];
@@ -171,14 +172,14 @@ private:
   std::recursive_mutex garmin_mutex_;
   double               garmin_measurement_;
 
-  int                           garmin_num_init_msgs_       = 0;
-  int                           garmin_num_avg_offset_msgs_ = 0;
-  int                           c_garmin_init_msgs_         = 0;
-  float                         garmin_offset_              = 0;
-  std::vector<float>            garmin_init_values_;
-  fog_lib::MedianFilter         alt_mf_garmin_;
-  double                        _garmin_min_valid_alt_;
-  double                        _garmin_max_valid_alt_;
+  int                   garmin_num_init_msgs_       = 0;
+  int                   garmin_num_avg_offset_msgs_ = 0;
+  int                   c_garmin_init_msgs_         = 0;
+  float                 garmin_offset_              = 0;
+  std::vector<float>    garmin_init_values_;
+  fog_lib::MedianFilter alt_mf_garmin_;
+  double                _garmin_min_valid_alt_;
+  double                _garmin_max_valid_alt_;
 
   // | -------------------- PX Vision Message ------------------- |
   unsigned long long                                          timestamp_;
@@ -231,6 +232,8 @@ private:
   // | --------------------- Service clients -------------------- |
   rclcpp::Client<fog_msgs::srv::SetPx4ParamInt>::SharedPtr   set_px4_param_int_;
   rclcpp::Client<fog_msgs::srv::SetPx4ParamFloat>::SharedPtr set_px4_param_float_;
+  rclcpp::Client<fog_msgs::srv::GetPx4ParamInt>::SharedPtr   get_px4_param_int_;
+  rclcpp::Client<fog_msgs::srv::GetPx4ParamFloat>::SharedPtr get_px4_param_float_;
   rclcpp::Client<std_srvs::srv::Trigger>::SharedPtr          reset_hector_client_;
   rclcpp::Client<std_srvs::srv::Trigger>::SharedPtr          land_client_;
 
@@ -347,6 +350,7 @@ private:
   rclcpp::CallbackGroup::SharedPtr callback_group_;
 
   // | --------------------- Utils function --------------------- |
+  bool   checkPx4Params(const std::vector<px4_int>& params_int, const std::vector<px4_float>& params_float);
   bool   setPx4Params(const std::vector<px4_int>& params_int, const std::vector<px4_float>& params_float);
   bool   updateEkfParameters();
   void   checkEstimatorReliability();
@@ -356,9 +360,13 @@ private:
 
   template <typename T, typename U, typename V>
   bool uploadPx4Parameters(const std::shared_ptr<T>& service_name, const std::vector<U>& param_array, const V& service_client);
+  template <typename T, typename U, typename V>
+  bool getPx4Parameters(const std::shared_ptr<T>& service_name, const std::vector<U>& param_array, const V& service_client);
 
   template <typename T>
   bool checkPx4ParamSetOutput(const std::shared_future<T> f);
+  template <typename T, typename U>
+  bool checkPx4ParamGetOutput(const std::shared_future<T> f, const U& req_value);
 };
 //}
 
@@ -409,30 +417,30 @@ Odometry2::Odometry2(rclcpp::NodeOptions options) : Node("odometry2", options) {
   loaded_successfully &= parse_param("altitude.avg_offset_msgs", garmin_num_avg_offset_msgs_, *this);
   loaded_successfully &= parse_param("altitude.num_init_msgs", garmin_num_init_msgs_, *this);
 
-  loaded_successfully &= parse_param("px4.parameter_set_timeout", px4_param_set_timeout_, *this);
-  loaded_successfully &= parse_param("px4.parameter_change", px4_param_change_, *this);
+  loaded_successfully &= parse_param("px4.parameter_handle_timeout", px4_param_handle_timeout_, *this);
 
   int   param_int;
   float param_float;
 
-  /*Hector px params loading//{*/
-  loaded_successfully &= parse_param("px4.hector.EKF2_AID_MASK", param_int, *this);
-  hector_px4_params_int_.push_back(px4_int("EKF2_AID_MASK", param_int));
-  /* loaded_successfully &= parse_param("px4.hector.EKF2_EV_NOISE_MD", param_int, *this); */
-  /* hector_px4_params_int_.push_back(px4_int("EKF2_EV_NOISE_MD", param_int)); */
-  loaded_successfully &= parse_param("px4.hector.EKF2_RNG_AID", param_int, *this);
-  /* hector_px4_params_int_.push_back(px4_int("EKF2_RNG_AID", param_int)); */
-  loaded_successfully &= parse_param("px4.hector.EKF2_HGT_MODE", param_int, *this);
-  /* hector_px4_params_int_.push_back(px4_int("EKF2_HGT_MODE", param_int)); */
+  /*General px params loading//{*/
+  loaded_successfully &= parse_param("px4.EKF2_AID_MASK", param_int, *this);
+  init_px4_params_int_.push_back(px4_int("EKF2_AID_MASK", param_int));
+  loaded_successfully &= parse_param("px4.EKF2_RNG_AID", param_int, *this);
+  init_px4_params_int_.push_back(px4_int("EKF2_RNG_AID", param_int));
+  loaded_successfully &= parse_param("px4.EKF2_RNG_A_HMAX", param_float, *this);
+  init_px4_params_float_.push_back(px4_float("EKF2_RNG_A_HMAX", param_float));
+  loaded_successfully &= parse_param("px4.EKF2_HGT_MODE", param_int, *this);
+  init_px4_params_int_.push_back(px4_int("EKF2_HGT_MODE", param_int));
+  loaded_successfully &= parse_param("px4.EKF2_EV_DELAY", param_float, *this);
+  init_px4_params_float_.push_back(px4_float("EKF2_EV_DELAY", param_float));
+  loaded_successfully &= parse_param("px4.EKF2_EV_NOISE_MD", param_int, *this);
+  init_px4_params_int_.push_back(px4_int("EKF2_EV_NOISE_MD", param_int));
+  loaded_successfully &= parse_param("px4.EKF2_EVP_NOISE", param_float, *this);
+  init_px4_params_float_.push_back(px4_float("EKF2_EVP_NOISE", param_float));
+  /*//}*/
 
-  loaded_successfully &= parse_param("px4.hector.EKF2_EV_DELAY", param_float, *this);
-  hector_px4_params_float_.push_back(px4_float("EKF2_EV_DELAY", param_float));
-  loaded_successfully &= parse_param("px4.hector.EKF2_EVP_NOISE", param_float, *this);
-  hector_px4_params_float_.push_back(px4_float("EKF2_EVP_NOISE", param_float));
-  loaded_successfully &= parse_param("px4.hector.EKF2_EVV_NOISE", param_float, *this);
-  hector_px4_params_float_.push_back(px4_float("EKF2_EVV_NOISE", param_float));
-  loaded_successfully &= parse_param("px4.hector.EKF2_RNG_A_HMAX", param_float, *this);
-  hector_px4_params_float_.push_back(px4_float("EKF2_RNG_A_HMAX", param_float));
+
+  /*Hector px params loading//{*/
   loaded_successfully &= parse_param("px4.hector.MPC_XY_CRUISE", param_float, *this);
   hector_px4_params_float_.push_back(px4_float("MPC_XY_CRUISE", param_float));
   loaded_successfully &= parse_param("px4.hector.MC_YAWRATE_MAX", param_float, *this);
@@ -452,18 +460,6 @@ Odometry2::Odometry2(rclcpp::NodeOptions options) : Node("odometry2", options) {
   /*//}*/
 
   /*GPS px params loading//{*/
-  loaded_successfully &= parse_param("px4.gps.EKF2_AID_MASK", param_int, *this);
-  gps_px4_params_int_.push_back(px4_int("EKF2_AID_MASK", param_int));
-  gps_px4_params_int_change_.push_back(px4_int("EKF2_AID_MASK", param_int));
-  loaded_successfully &= parse_param("px4.gps.EKF2_RNG_AID", param_int, *this);
-  gps_px4_params_int_.push_back(px4_int("EKF2_RNG_AID", param_int));
-  loaded_successfully &= parse_param("px4.gps.EKF2_HGT_MODE", param_int, *this);
-  gps_px4_params_int_.push_back(px4_int("EKF2_HGT_MODE", param_int));
-  loaded_successfully &= parse_param("px4.hector.EKF2_EV_NOISE_MD", param_int, *this);
-  gps_px4_params_int_.push_back(px4_int("EKF2_EV_NOISE_MD", param_int));
-
-  loaded_successfully &= parse_param("px4.gps.EKF2_RNG_A_HMAX", param_float, *this);
-  gps_px4_params_float_.push_back(px4_float("EKF2_RNG_A_HMAX", param_float));
   loaded_successfully &= parse_param("px4.gps.MPC_XY_CRUISE", param_float, *this);
   gps_px4_params_float_.push_back(px4_float("MPC_XY_CRUISE", param_float));
   loaded_successfully &= parse_param("px4.gps.MC_YAWRATE_MAX", param_float, *this);
@@ -620,6 +616,8 @@ Odometry2::Odometry2(rclcpp::NodeOptions options) : Node("odometry2", options) {
   // | -------------------- Service clients  -------------------- |
   set_px4_param_int_   = this->create_client<fog_msgs::srv::SetPx4ParamInt>("~/set_px4_param_int");
   set_px4_param_float_ = this->create_client<fog_msgs::srv::SetPx4ParamFloat>("~/set_px4_param_float");
+  get_px4_param_int_   = this->create_client<fog_msgs::srv::GetPx4ParamInt>("~/get_px4_param_int");
+  get_px4_param_float_ = this->create_client<fog_msgs::srv::GetPx4ParamFloat>("~/get_px4_param_float");
   reset_hector_client_ = this->create_client<std_srvs::srv::Trigger>("~/reset_hector_service_out");
   land_client_         = this->create_client<std_srvs::srv::Trigger>("~/land_service_out");
 
@@ -1074,12 +1072,30 @@ void Odometry2::state_odometry_init() {
 
   RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000, "Odometry state: Initializing odometry module.");
 
-  // Set and handle initial PX4 parameters setting
-  if (!set_initial_px4_params_) {
-    RCLCPP_INFO(get_logger(), "Odometry state: Setting initial PX4 parameters for GPS.");
-    if (setPx4Params(gps_px4_params_int_, hector_px4_params_float_)) {
-      last_set_parameters_    = odometry_state_t::gps;
+  // Force user to restart pixhawk after core parameters update
+  if (px4_param_restart_required_) {
+    RCLCPP_ERROR_THROTTLE(get_logger(), *get_clock(), 500, "PX4 EKF2 parameters updated. Pixhawk restart is required.");
+    return;
+  }
+
+  // Handle initial PX4 parameters setting
+  if (check_initial_px4_params_) {
+    RCLCPP_INFO(get_logger(), "Odometry state: Check initial PX4 parameters settings.");
+    if (checkPx4Params(init_px4_params_int_, init_px4_params_float_)) {
+      RCLCPP_INFO(get_logger(), "Odometry state: All PX4 parameters are set correctly.");
+      set_initial_px4_params_   = false;
+    } else {
+      RCLCPP_WARN(get_logger(), "Odometry state: Not all PX4 parameters are set correctly.");
       set_initial_px4_params_ = true;
+    }
+    check_initial_px4_params_ = false;
+  }
+  // Set initial PX4 parameters
+  if (set_initial_px4_params_) {
+    if (setPx4Params(init_px4_params_int_, init_px4_params_float_)) {
+      RCLCPP_INFO(get_logger(), "Odometry state: All initial PX4 parameters were set correctly.");
+      px4_param_restart_required_ = true;
+      return;
     } else {
       if (manual_detected_) {
         odometry_state_ = odometry_state_t::manual;
@@ -1478,7 +1494,7 @@ void Odometry2::state_hector_init() {
 
   std::string temp;
   if (!tf_buffer_->canTransform(fcu_frame_, local_origin_frame_, rclcpp::Time(0), std::chrono::duration<double>(0), &temp)) {
-    RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000, "Hector state: Missing TF between ned_origin and frd_fcu frame from GPS.");
+    RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000, "Hector state: Missing TF between ned_origin and frd_fcu frame from GPS/Static TF.");
     return;
   }
 
@@ -1755,9 +1771,10 @@ bool Odometry2::checkGpsReliability() {
 
   assert(false);
   RCLCPP_ERROR(get_logger(), "This should not happen.");
-} /*//}*
+} /*//}*/
 
 /* checkGpsTime //{*/
+
 // the following mutexes have to be locked by the calling function:
 // gps_raw_mutex_
 // gps_mutex_
@@ -2293,16 +2310,13 @@ void Odometry2::checkEstimatorReliability() {
 // odometry_mutex_
 bool Odometry2::updateEkfParameters() {
 
-  std::vector<px4_int> px4_params_int;
-
   if (switching_state_ == odometry_state_t::gps) {
     if (last_set_parameters_ == odometry_state_t::gps) {
       // Parameters are already set up from before, return right away
       RCLCPP_INFO(get_logger(), "Odometry state: Do not have to update parameters for GPS, already set up.");
       return true;
     }
-    std::vector<px4_float> temp;
-    if (setPx4Params(gps_px4_params_int_change_, temp)) {
+    if (setPx4Params(std::vector<px4_int>(), gps_px4_params_float_)) {
       last_set_parameters_ = odometry_state_t::gps;
       return true;
     }
@@ -2312,8 +2326,7 @@ bool Odometry2::updateEkfParameters() {
       // Parameters are already set up from before, return right away
       return true;
     }
-    std::vector<px4_float> temp;
-    if (setPx4Params(hector_px4_params_int_, temp)) {
+    if (setPx4Params(std::vector<px4_int>(), hector_px4_params_float_)) {
       last_set_parameters_ = odometry_state_t::hector;
       return true;
     }
@@ -2344,13 +2357,55 @@ geometry_msgs::msg::PoseStamped Odometry2::transformBetween(std::string& frame_f
 }
 //}
 
+/*checkPx4Params//{*/
+bool Odometry2::checkPx4Params(const std::vector<px4_int>& params_int, const std::vector<px4_float>& params_float) {
+
+  if (!getPx4Parameters(std::make_shared<fog_msgs::srv::GetPx4ParamInt::Request>(), params_int, get_px4_param_int_) ||
+      !getPx4Parameters(std::make_shared<fog_msgs::srv::GetPx4ParamFloat::Request>(), params_float, get_px4_param_float_)) {
+    return false;
+  }
+  return true;
+}
+/*//}*/
+
+/* getPx4Parameters //{ */
+template <typename T, typename U, typename V>
+bool Odometry2::getPx4Parameters(const std::shared_ptr<T>& request, const std::vector<U>& param_array, const V& service_client) {
+  for (const auto item : param_array) {
+    request->param_name = std::get<0>(item);
+    RCLCPP_INFO(get_logger(), "Getting value of px4 parameter %s", std::get<0>(item).c_str());
+    auto future_response = service_client->async_send_request(request);
+    // If parameter has different value than requested, return false
+    px4_param_check_value_ = (float)std::get<1>(item);
+    if (!checkPx4ParamGetOutput(future_response, (float)std::get<1>(item))) {
+      return false;
+    }
+  }
+  return true;
+}
+//}
+
+/* checkPx4ParamGetOutput //{ */
+template <typename T, typename U>
+bool Odometry2::checkPx4ParamGetOutput(const std::shared_future<T> f, const U& req_value) {
+  assert(f.valid());
+  if (f.wait_for(std::chrono::seconds(px4_param_handle_timeout_)) == std::future_status::timeout || f.get() == nullptr) {
+    RCLCPP_ERROR(get_logger(), "Cannot get the value of parameter %s with error message: %s", f.get()->param_name.c_str(), f.get()->message.c_str());
+    return false;
+  } else {
+    if (req_value == (float)f.get()->value) {
+      RCLCPP_INFO(get_logger(), "Parameter %s already has requested value %f. req_value: %f", f.get()->param_name.c_str(), (float)f.get()->value, req_value);
+      return true;
+    } else {
+      RCLCPP_WARN(get_logger(), "Parameter %s does not have requested value %f, req_value: %f", f.get()->param_name.c_str(), (float)f.get()->value, req_value);
+      return false;
+    }
+  }
+}
+//}
+
 /*setPx4Params//{*/
 bool Odometry2::setPx4Params(const std::vector<px4_int>& params_int, const std::vector<px4_float>& params_float) {
-
-  if (!px4_param_change_) {
-    RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000, "PX4 parameter change is switched off");
-    return true;
-  }
 
   if (!uploadPx4Parameters(std::make_shared<fog_msgs::srv::SetPx4ParamInt::Request>(), params_int, set_px4_param_int_) ||
       !uploadPx4Parameters(std::make_shared<fog_msgs::srv::SetPx4ParamFloat::Request>(), params_float, set_px4_param_float_)) {
@@ -2366,7 +2421,7 @@ bool Odometry2::uploadPx4Parameters(const std::shared_ptr<T>& request, const std
   for (const auto item : param_array) {
     request->param_name = std::get<0>(item);
     request->value      = std::get<1>(item);
-    RCLCPP_INFO(get_logger(), "Setting %s, value: %f", std::get<0>(item).c_str(), (float)std::get<1>(item));
+    RCLCPP_INFO(get_logger(), "Setting px4 parameter %s, value: %f", std::get<0>(item).c_str(), (float)std::get<1>(item));
     // Detect if manual mode might be on before sending the parameter update
     if (manual_detected_) {
       RCLCPP_WARN(get_logger(), "Manual mode detected, stop setting parameters!");
@@ -2410,7 +2465,7 @@ double Odometry2::getHeading(const geometry_msgs::msg::Quaternion& q) {
 template <typename T>
 bool Odometry2::checkPx4ParamSetOutput(const std::shared_future<T> f) {
   assert(f.valid());
-  if (f.wait_for(std::chrono::seconds(px4_param_set_timeout_)) == std::future_status::timeout || f.get() == nullptr) {
+  if (f.wait_for(std::chrono::seconds(px4_param_handle_timeout_)) == std::future_status::timeout || f.get() == nullptr) {
     RCLCPP_ERROR(get_logger(), "Cannot set the parameter %s with message: %s", f.get()->param_name.c_str(), f.get()->message.c_str());
     return false;
   } else {
