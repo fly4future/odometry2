@@ -37,6 +37,7 @@
 #include <px4_msgs/msg/vehicle_visual_odometry.hpp>
 #include <px4_msgs/msg/distance_sensor.hpp>
 #include <px4_msgs/msg/home_position.hpp>
+#include <px4_msgs/msg/vehicle_local_position.hpp>
 
 #include <tf2_geometry_msgs/tf2_geometry_msgs.h>  // This has to be here otherwise you will get cryptic linker error about missing function 'getTimestamp'
 
@@ -219,6 +220,10 @@ private:
   rclcpp::Publisher<px4_msgs::msg::HomePosition>::SharedPtr          home_position_publisher_;
   rclcpp::Publisher<fog_msgs::msg::Heading>::SharedPtr               heading_publisher_;
 
+  rclcpp::Publisher<px4_msgs::msg::VehicleVisualOdometry>::SharedPtr republish_hector_odometry_publisher_;
+  rclcpp::Publisher<px4_msgs::msg::VehicleOdometry>::SharedPtr       republisher_pixhawk_odom;
+  rclcpp::Publisher<px4_msgs::msg::VehicleLocalPosition>::SharedPtr  republisher_local_position;
+
   // | ----------------------- Subscribers ---------------------- |
   rclcpp::Subscription<px4_msgs::msg::VehicleOdometry>::SharedPtr             pixhawk_odom_subscriber_;
   rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr            hector_pose_subscriber_;
@@ -227,6 +232,8 @@ private:
   rclcpp::Subscription<fog_msgs::msg::ControlInterfaceDiagnostics>::SharedPtr control_interface_diagnostics_subscriber_;
   rclcpp::Subscription<px4_msgs::msg::DistanceSensor>::SharedPtr              garmin_subscriber_;
   rclcpp::Subscription<px4_msgs::msg::HomePosition>::SharedPtr                home_position_subscriber_;
+
+  rclcpp::Subscription<px4_msgs::msg::VehicleLocalPosition>::SharedPtr subscriber_local_position;
 
   // | -------------------- Service providers ------------------- |
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr              reset_hector_service_;
@@ -248,6 +255,8 @@ private:
   void ControlInterfaceDiagnosticsCallback(const fog_msgs::msg::ControlInterfaceDiagnostics::UniquePtr msg);
   void garminCallback(const px4_msgs::msg::DistanceSensor::UniquePtr msg);
   void homePositionCallback(const px4_msgs::msg::HomePosition::UniquePtr msg);
+
+  void vehicleLocalPositionCallback(const px4_msgs::msg::VehicleLocalPosition::UniquePtr msg);
 
   // | -------------------- Service callbacks ------------------- |
   bool resetHectorCallback(const std::shared_ptr<std_srvs::srv::Trigger::Request> request, std::shared_ptr<std_srvs::srv::Trigger::Response> response);
@@ -598,8 +607,12 @@ Odometry2::Odometry2(rclcpp::NodeOptions options) : Node("odometry2", options) {
   gps_diagnostics_publisher_      = this->create_publisher<fog_msgs::msg::EstimatorDiagnostics>("~/gps_diagnostics_out", qos);
   hector_diagnostics_publisher_   = this->create_publisher<fog_msgs::msg::EstimatorDiagnostics>("~/hector_diagnostics_out", qos);
   hector_odometry_publisher_      = this->create_publisher<px4_msgs::msg::VehicleVisualOdometry>("~/hector_odometry_out", qos);
-  heading_publisher_              = this->create_publisher<fog_msgs::msg::Heading>("~/heading_out", 10);
-  home_position_publisher_        = this->create_publisher<px4_msgs::msg::HomePosition>("~/home_position_out", 10);
+  heading_publisher_              = this->create_publisher<fog_msgs::msg::Heading>("~/heading_out", qos);
+  home_position_publisher_        = this->create_publisher<px4_msgs::msg::HomePosition>("~/home_position_out", qos);
+
+  republish_hector_odometry_publisher_ = this->create_publisher<px4_msgs::msg::VehicleVisualOdometry>("~/republish_hector_odometry_out", qos);
+  republisher_pixhawk_odom             = this->create_publisher<px4_msgs::msg::VehicleOdometry>("~/republish_pixhawk_odometry_out", qos);
+  republisher_local_position           = this->create_publisher<px4_msgs::msg::VehicleLocalPosition>("~/republish_local_position_out", qos);
 
   // | ----------------------- Subscribers ---------------------- |
   rclcpp::SubscriptionOptions subopts;
@@ -625,6 +638,10 @@ Odometry2::Odometry2(rclcpp::NodeOptions options) : Node("odometry2", options) {
   subopts.callback_group    = new_cbk_grp();
   home_position_subscriber_ = this->create_subscription<px4_msgs::msg::HomePosition>("~/home_position_in", rclcpp::SystemDefaultsQoS(),
                                                                                      std::bind(&Odometry2::homePositionCallback, this, _1), subopts);
+
+  subopts.callback_group    = new_cbk_grp();
+  subscriber_local_position = this->create_subscription<px4_msgs::msg::VehicleLocalPosition>(
+      "~/vehicle_local_position", rclcpp::SystemDefaultsQoS(), std::bind(&Odometry2::vehicleLocalPositionCallback, this, _1), subopts);
 
   // | -------------------- Service clients  -------------------- |
   set_px4_param_int_   = this->create_client<fog_msgs::srv::SetPx4ParamInt>("~/set_px4_param_int");
@@ -829,8 +846,49 @@ void Odometry2::pixhawkOdomCallback(const px4_msgs::msg::VehicleOdometry::Unique
 
   getting_pixhawk_odometry_ = true;
   RCLCPP_INFO_ONCE(get_logger(), "Getting pixhawk odometry!");
+
+  // Republishing Vehicle Odometry for PlotJuggler visualization
+  px4_msgs::msg::VehicleOdometry republish;
+
+  republish.timestamp        = msg->timestamp;
+  republish.timestamp_sample = msg->timestamp_sample;
+
+  republish.x = msg->x;
+  republish.y = msg->y;
+  republish.z = msg->z;
+
+  republish.q[0] = msg->q[0];
+  republish.q[1] = msg->q[1];
+  republish.q[2] = msg->q[2];
+  republish.q[3] = msg->q[3];
+
+  republisher_pixhawk_odom->publish(republish);
 }
 //}
+
+
+/* vehicleLocalPositionCallback //{ */
+void Odometry2::vehicleLocalPositionCallback(const px4_msgs::msg::VehicleLocalPosition::UniquePtr msg) {
+
+  scope_timer tim(scope_timer_enable_, "VehicleLocalPositionCallback", get_logger(), scope_timer_min_dur_, scope_timer_throttle_);
+
+  if (!is_initialized_) {
+    return;
+  }
+
+  px4_msgs::msg::VehicleLocalPosition republish;
+
+  republish.timestamp        = msg->timestamp;
+  republish.timestamp_sample = msg->timestamp_sample;
+
+  republish.x = msg->x;
+  republish.y = msg->y;
+  republish.z = msg->z;
+
+  republisher_local_position->publish(republish);
+}
+//}
+
 
 /* gpsCallback //{ */
 void Odometry2::gpsCallback(const px4_msgs::msg::VehicleGpsPosition::UniquePtr msg) {
@@ -2215,6 +2273,8 @@ void Odometry2::publishHectorOdometry() {
   rviz_msg.pose.pose.orientation.z = tf.pose.orientation.z;
 
   local_hector_publisher_->publish(rviz_msg);
+
+  republish_hector_odometry_publisher_->publish(hector_odometry_msg);
 
   if (hector_allow_px4_publish_) {
     hector_odometry_publisher_->publish(hector_odometry_msg);
