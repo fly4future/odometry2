@@ -1,6 +1,7 @@
 odometry_loop_rate: 100.0 # [Hz] The main node, publishing local odometry
 gps_loop_rate:      50.0 # [Hz]
 hector_loop_rate:   20.0 # [Hz] Publishing vision odometry to pixhawk
+home_position_publish_rate: 1.0 # [Hz]
 print_callback_durations: true # for debugging purposes
 print_callback_min_dur: 0.002 # [s] shorter callback durations than this will be ignored and not printed
 

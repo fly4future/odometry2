@@ -58,29 +58,29 @@ Visualization Manager:
       Frame Timeout: 15
       Frames:
         All Enabled: false
-        ssrc_fog_x/fcu:
+        uav1/fcu:
           Value: false
-        ssrc_fog_x/fcu/arms:
+        uav1/fcu/arms:
           Value: false
-        ssrc_fog_x/fcu/arms_red:
+        uav1/fcu/arms_red:
           Value: false
-        ssrc_fog_x/fcu/props:
+        uav1/fcu/props:
           Value: false
-        ssrc_fog_x/fcu/uav_marker:
+        uav1/fcu/uav_marker:
           Value: false
-        ssrc_fog_x/frd_fcu:
+        uav1/frd_fcu:
           Value: false
-        ssrc_fog_x/garmin:
+        uav1/garmin:
           Value: false
-        ssrc_fog_x/hector_fcu:
+        uav1/hector_fcu:
           Value: false
-        ssrc_fog_x/hector_origin:
+        uav1/hector_origin:
           Value: false
-        ssrc_fog_x/local_origin:
+        uav1/local_origin:
           Value: false
-        ssrc_fog_x/ned_origin:
+        uav1/ned_origin:
           Value: false
-        ssrc_fog_x/rplidar:
+        uav1/rplidar:
           Value: false
       Marker Scale: 3
       Name: TF
@@ -88,24 +88,24 @@ Visualization Manager:
       Show Axes: true
       Show Names: false
       Tree:
-        ssrc_fog_x/local_origin:
-          ssrc_fog_x/hector_origin:
-            ssrc_fog_x/hector_fcu:
+        uav1/local_origin:
+          uav1/hector_origin:
+            uav1/hector_fcu:
               {}
-          ssrc_fog_x/ned_origin:
-            ssrc_fog_x/frd_fcu:
-              ssrc_fog_x/fcu:
-                ssrc_fog_x/fcu/arms:
+          uav1/ned_origin:
+            uav1/frd_fcu:
+              uav1/fcu:
+                uav1/fcu/arms:
                   {}
-                ssrc_fog_x/fcu/arms_red:
+                uav1/fcu/arms_red:
                   {}
-                ssrc_fog_x/fcu/props:
+                uav1/fcu/props:
                   {}
-                ssrc_fog_x/fcu/uav_marker:
+                uav1/fcu/uav_marker:
                   {}
-                ssrc_fog_x/garmin:
+                uav1/garmin:
                   {}
-                ssrc_fog_x/rplidar:
+                uav1/rplidar:
                   {}
       Update Interval: 0
       Value: true
@@ -148,7 +148,7 @@ Visualization Manager:
             Filter size: 10
             History Policy: Keep Last
             Reliability Policy: Reliable
-            Value: /ssrc_fog_x/odometry/local_odom
+            Value: /uav1/odometry/local_odom
           Value: true
         - Angle Tolerance: 0.10000000149011612
           Class: rviz_default_plugins/Odometry
@@ -187,7 +187,7 @@ Visualization Manager:
             Filter size: 10
             History Policy: Keep Last
             Reliability Policy: Reliable
-            Value: /ssrc_fog_x/odometry/local_hector
+            Value: /uav1/odometry/local_hector
           Value: true
       Enabled: true
       Name: Odometry
@@ -205,13 +205,13 @@ Visualization Manager:
             Filter size: 10
             History Policy: Keep Last
             Reliability Policy: Reliable
-            Value: /ssrc_fog_x/hector_mapping/map
+            Value: /uav1/hector_mapping/map
           Update Topic:
             Depth: 5
             Durability Policy: Volatile
             History Policy: Keep Last
             Reliability Policy: Reliable
-            Value: /ssrc_fog_x/hector_mapping/map_updates
+            Value: /uav1/hector_mapping/map_updates
           Use Timestamp: false
           Value: true
       Enabled: true
@@ -253,7 +253,7 @@ Visualization Manager:
         Filter size: 10
         History Policy: Keep Last
         Reliability Policy: Best Effort
-        Value: /ssrc_fog_x/rplidar/scan
+        Value: /uav1/rplidar/scan
       Use Fixed Frame: true
       Use rainbow: true
       Value: true
@@ -270,7 +270,7 @@ Visualization Manager:
             Filter size: 10
             History Policy: Keep Last
             Reliability Policy: Reliable
-            Value: /ssrc_fog_x/navigation/visualization/binary_tree_markers
+            Value: /uav1/navigation/visualization/binary_tree_markers
           Value: true
         - Class: rviz_default_plugins/Marker
           Enabled: true
@@ -283,7 +283,7 @@ Visualization Manager:
             Filter size: 10
             History Policy: Keep Last
             Reliability Policy: Reliable
-            Value: /ssrc_fog_x/navigation/visualization/goal_markers
+            Value: /uav1/navigation/visualization/goal_markers
           Value: true
         - Class: rviz_default_plugins/Marker
           Enabled: true
@@ -296,7 +296,7 @@ Visualization Manager:
             Filter size: 10
             History Policy: Keep Last
             Reliability Policy: Reliable
-            Value: /ssrc_fog_x/navigation/visualization/path_markers
+            Value: /uav1/navigation/visualization/path_markers
           Value: true
         - Class: rviz_default_plugins/Marker
           Enabled: true
@@ -309,7 +309,7 @@ Visualization Manager:
             Filter size: 10
             History Policy: Keep Last
             Reliability Policy: Reliable
-            Value: /ssrc_fog_x/navigation/visualization/expansion_markers
+            Value: /uav1/navigation/visualization/expansion_markers
           Value: true
       Enabled: true
       Name: Navigation
@@ -327,13 +327,13 @@ Visualization Manager:
             Filter size: 10
             History Policy: Keep Last
             Reliability Policy: Best Effort
-            Value: /ssrc_fog_x/octomap_server/projected_map
+            Value: /uav1/octomap_server/projected_map
           Update Topic:
             Depth: 5
             Durability Policy: Volatile
             History Policy: Keep Last
             Reliability Policy: Reliable
-            Value: /ssrc_fog_x/octomap_server/projected_map_updates
+            Value: /uav1/octomap_server/projected_map_updates
           Use Timestamp: false
           Value: false
         - Alpha: 1
@@ -366,7 +366,7 @@ Visualization Manager:
             Filter size: 10
             History Policy: Keep Last
             Reliability Policy: Reliable
-            Value: /ssrc_fog_x/octomap_server/octomap_point_cloud_centers
+            Value: /uav1/octomap_server/octomap_point_cloud_centers
           Use Fixed Frame: true
           Use rainbow: true
           Value: true
@@ -391,7 +391,7 @@ Visualization Manager:
         Filter size: 10
         History Policy: Keep Last
         Reliability Policy: Reliable
-        Value: /ssrc_fog_x/control_interface/waypoint_markers_out
+        Value: /uav1/control_interface/waypoint_markers_out
       Value: true
     - Alpha: 1
       Class: rviz_default_plugins/RobotModel
@@ -403,7 +403,7 @@ Visualization Manager:
         Durability Policy: Volatile
         History Policy: Keep Last
         Reliability Policy: Reliable
-        Value: /ssrc_fog_x/robot_description
+        Value: /uav1/robot_description
       Enabled: true
       Links:
         All Links Enabled: true
@@ -411,27 +411,27 @@ Visualization Manager:
         Expand Link Details: false
         Expand Tree: false
         Link Tree Style: Links in Alphabetic Order
-        ssrc_fog_x/fcu:
+        uav1/fcu:
           Alpha: 1
           Show Axes: false
           Show Trail: false
           Value: true
-        ssrc_fog_x/fcu/arms:
+        uav1/fcu/arms:
           Alpha: 1
           Show Axes: false
           Show Trail: false
           Value: true
-        ssrc_fog_x/fcu/arms_red:
+        uav1/fcu/arms_red:
           Alpha: 1
           Show Axes: false
           Show Trail: false
           Value: true
-        ssrc_fog_x/fcu/props:
+        uav1/fcu/props:
           Alpha: 1
           Show Axes: false
           Show Trail: false
           Value: true
-        ssrc_fog_x/fcu/uav_marker:
+        uav1/fcu/uav_marker:
           Alpha: 1
           Show Axes: false
           Show Trail: false
@@ -459,13 +459,13 @@ Visualization Manager:
         Durability Policy: Volatile
         History Policy: Keep Last
         Reliability Policy: Reliable
-        Value: /ssrc_fog_x/bumper/obstacle_sectors
+        Value: /uav1/bumper/obstacle_sectors
       Value: false
       Vertical collision threshold: 1
   Enabled: true
   Global Options:
     Background Color: 255; 255; 255
-    Fixed Frame: ssrc_fog_x/local_origin
+    Fixed Frame: uav1/local_origin
     Frame Rate: 30
   Name: root
   Tools:

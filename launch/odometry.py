@@ -47,6 +47,7 @@ def generate_launch_description():
                     ("~/odometry_diagnostics_out", "~/odometry_diagnostics"),
                     ("~/gps_diagnostics_out", "~/gps_diagnostics"),
                     ("~/hector_diagnostics_out", "~/hector_diagnostics"),
+                    ("~/home_position_out", "~/home_position"),
                     ("~/heading_out", "~/heading"),
                     # subscribers
                     ("~/pixhawk_odom_in", "/" + DRONE_DEVICE_ID + "/fmu/vehicle_odometry/out"),
@@ -55,6 +56,7 @@ def generate_launch_description():
                     ("~/hector_pose_in", "/" + DRONE_DEVICE_ID + "/hector_mapping/slam_out_pose"),
                     ("~/control_interface_diagnostics_in", "/" + DRONE_DEVICE_ID + "/control_interface/diagnostics"),
                     ("~/garmin_in", "/" + DRONE_DEVICE_ID + "/fmu/distance_sensor/out"),
+                    ("~/home_position_in", "/" + DRONE_DEVICE_ID + "/fmu/home_position/out"),
                     # service_providers
                     ("~/reset_hector_service_in", "~/reset_hector_service"),
                     ("~/change_odometry_source_in", "~/change_odometry_source"),

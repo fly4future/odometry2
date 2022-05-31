@@ -29,12 +29,14 @@
 #include <fog_lib/params.h>
 #include <fog_lib/median_filter.h>
 #include <fog_lib/geometry/misc.h>
+#include <fog_lib/gps_conversions.h>
 
 #include <px4_msgs/msg/timesync.hpp>
 #include <px4_msgs/msg/vehicle_gps_position.hpp>
 #include <px4_msgs/msg/vehicle_odometry.hpp>
 #include <px4_msgs/msg/vehicle_visual_odometry.hpp>
 #include <px4_msgs/msg/distance_sensor.hpp>
+#include <px4_msgs/msg/home_position.hpp>
 
 #include <tf2_geometry_msgs/tf2_geometry_msgs.h>  // This has to be here otherwise you will get cryptic linker error about missing function 'getTimestamp'
 
@@ -104,18 +106,17 @@ private:
   std::atomic_bool       getting_pixhawk_odometry_              = false;
   std::atomic_bool       px4_param_restart_required_            = false;
   int                    px4_param_handle_timeout_              = 0;
-  float                  px4_param_check_value_                 = 0.0;
 
   float                px4_position_[3];
   float                px4_orientation_[4];
   std::recursive_mutex px4_pose_mutex_;
 
-  int ekf_default_hgt_mode_ = 0;
+  // | -------------------- PX utm and home position -------------------- |
+  double     px4_utm_position_[2];
+  std::mutex px4_utm_position_mutex_;
 
-  // | -------------------- PX home position -------------------- |
-  double               px4_utm_position_[2];
-  std::atomic_bool     republish_static_tf_ = false;
-  std::recursive_mutex px4_utm_position_mutex_;
+  px4_msgs::msg::HomePosition px4_home_position_;
+  std::mutex                  px4_home_position_mutex_;
 
   // | --------------------- GPS parameters --------------------- |
   std::atomic_bool     gps_active_  = false;
@@ -215,6 +216,7 @@ private:
   rclcpp::Publisher<fog_msgs::msg::EstimatorDiagnostics>::SharedPtr  gps_diagnostics_publisher_;
   rclcpp::Publisher<fog_msgs::msg::EstimatorDiagnostics>::SharedPtr  hector_diagnostics_publisher_;
   rclcpp::Publisher<px4_msgs::msg::VehicleVisualOdometry>::SharedPtr hector_odometry_publisher_;
+  rclcpp::Publisher<px4_msgs::msg::HomePosition>::SharedPtr          home_position_publisher_;
   rclcpp::Publisher<fog_msgs::msg::Heading>::SharedPtr               heading_publisher_;
 
   // | ----------------------- Subscribers ---------------------- |
@@ -224,6 +226,7 @@ private:
   rclcpp::Subscription<px4_msgs::msg::VehicleGpsPosition>::SharedPtr          gps_subscriber_;
   rclcpp::Subscription<fog_msgs::msg::ControlInterfaceDiagnostics>::SharedPtr control_interface_diagnostics_subscriber_;
   rclcpp::Subscription<px4_msgs::msg::DistanceSensor>::SharedPtr              garmin_subscriber_;
+  rclcpp::Subscription<px4_msgs::msg::HomePosition>::SharedPtr                home_position_subscriber_;
 
   // | -------------------- Service providers ------------------- |
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr              reset_hector_service_;
@@ -244,6 +247,7 @@ private:
   void gpsCallback(const px4_msgs::msg::VehicleGpsPosition::UniquePtr msg);
   void ControlInterfaceDiagnosticsCallback(const fog_msgs::msg::ControlInterfaceDiagnostics::UniquePtr msg);
   void garminCallback(const px4_msgs::msg::DistanceSensor::UniquePtr msg);
+  void homePositionCallback(const px4_msgs::msg::HomePosition::UniquePtr msg);
 
   // | -------------------- Service callbacks ------------------- |
   bool resetHectorCallback(const std::shared_ptr<std_srvs::srv::Trigger::Request> request, std::shared_ptr<std_srvs::srv::Trigger::Response> response);
@@ -346,6 +350,11 @@ private:
   void publishHectorDiagnostics();
   void updateHectorEstimator();
 
+  // | ------------------ Home position routine ----------------- |
+  double                       home_position_publish_rate_;
+  void                         homePositionPublisher(void);
+  rclcpp::TimerBase::SharedPtr home_position_timer_;
+
   // | -------------------- Routine handling -------------------- |
   rclcpp::CallbackGroup::SharedPtr callback_group_;
 
@@ -391,6 +400,7 @@ Odometry2::Odometry2(rclcpp::NodeOptions options) : Node("odometry2", options) {
   loaded_successfully &= parse_param("odometry_loop_rate", odometry_loop_rate_, *this);
   loaded_successfully &= parse_param("gps_loop_rate", gps_loop_rate_, *this);
   loaded_successfully &= parse_param("hector_loop_rate", hector_loop_rate_, *this);
+  loaded_successfully &= parse_param("home_position_publish_rate", home_position_publish_rate_, *this);
   loaded_successfully &= parse_param("print_callback_durations", scope_timer_enable_, *this);
   loaded_successfully &= parse_param("print_callback_min_dur", scope_timer_min_dur_, *this);
 
@@ -438,7 +448,6 @@ Odometry2::Odometry2(rclcpp::NodeOptions options) : Node("odometry2", options) {
   loaded_successfully &= parse_param("px4.EKF2_EVP_NOISE", param_float, *this);
   init_px4_params_float_.push_back(px4_float("EKF2_EVP_NOISE", param_float));
   /*//}*/
-
 
   /*Hector px params loading//{*/
   loaded_successfully &= parse_param("px4.hector.MPC_XY_CRUISE", param_float, *this);
@@ -590,6 +599,7 @@ Odometry2::Odometry2(rclcpp::NodeOptions options) : Node("odometry2", options) {
   hector_diagnostics_publisher_   = this->create_publisher<fog_msgs::msg::EstimatorDiagnostics>("~/hector_diagnostics_out", qos);
   hector_odometry_publisher_      = this->create_publisher<px4_msgs::msg::VehicleVisualOdometry>("~/hector_odometry_out", qos);
   heading_publisher_              = this->create_publisher<fog_msgs::msg::Heading>("~/heading_out", 10);
+  home_position_publisher_        = this->create_publisher<px4_msgs::msg::HomePosition>("~/home_position_out", 10);
 
   // | ----------------------- Subscribers ---------------------- |
   rclcpp::SubscriptionOptions subopts;
@@ -606,12 +616,15 @@ Odometry2::Odometry2(rclcpp::NodeOptions options) : Node("odometry2", options) {
   subopts.callback_group                    = new_cbk_grp();
   control_interface_diagnostics_subscriber_ = this->create_subscription<fog_msgs::msg::ControlInterfaceDiagnostics>(
       "~/control_interface_diagnostics_in", rclcpp::SystemDefaultsQoS(), std::bind(&Odometry2::ControlInterfaceDiagnosticsCallback, this, _1), subopts);
-  subopts.callback_group  = new_cbk_grp();
-  hector_pose_subscriber_ = this->create_subscription<geometry_msgs::msg::PoseStamped>("~/hector_pose_in", rclcpp::SystemDefaultsQoS(),
+  subopts.callback_group    = new_cbk_grp();
+  hector_pose_subscriber_   = this->create_subscription<geometry_msgs::msg::PoseStamped>("~/hector_pose_in", rclcpp::SystemDefaultsQoS(),
                                                                                        std::bind(&Odometry2::hectorPoseCallback, this, _1), subopts);
-  subopts.callback_group  = new_cbk_grp();
-  garmin_subscriber_      = this->create_subscription<px4_msgs::msg::DistanceSensor>("~/garmin_in", rclcpp::SystemDefaultsQoS(),
+  subopts.callback_group    = new_cbk_grp();
+  garmin_subscriber_        = this->create_subscription<px4_msgs::msg::DistanceSensor>("~/garmin_in", rclcpp::SystemDefaultsQoS(),
                                                                                 std::bind(&Odometry2::garminCallback, this, _1), subopts);
+  subopts.callback_group    = new_cbk_grp();
+  home_position_subscriber_ = this->create_subscription<px4_msgs::msg::HomePosition>("~/home_position_in", rclcpp::SystemDefaultsQoS(),
+                                                                                     std::bind(&Odometry2::homePositionCallback, this, _1), subopts);
 
   // | -------------------- Service clients  -------------------- |
   set_px4_param_int_   = this->create_client<fog_msgs::srv::SetPx4ParamInt>("~/set_px4_param_int");
@@ -653,6 +666,11 @@ Odometry2::Odometry2(rclcpp::NodeOptions options) : Node("odometry2", options) {
   hector_timer_ = this->create_wall_timer(std::chrono::duration<double>(1.0 / hector_loop_rate_), std::bind(&Odometry2::hectorRoutine, this), new_cbk_grp());
   hector_diagnostics_timer_ =
       this->create_wall_timer(std::chrono::duration<double>(1.0 / hector_loop_rate_), std::bind(&Odometry2::hectorDiagnosticsRoutine, this), new_cbk_grp());
+
+  // | ------------------ Home position routine ----------------- |
+  //
+  home_position_timer_ = this->create_wall_timer(std::chrono::duration<double>(1.0 / home_position_publish_rate_),
+                                                 std::bind(&Odometry2::homePositionPublisher, this), new_cbk_grp());
 
   tf_broadcaster_        = nullptr;
   static_tf_broadcaster_ = nullptr;
@@ -842,6 +860,46 @@ void Odometry2::gpsCallback(const px4_msgs::msg::VehicleGpsPosition::UniquePtr m
   gps_eph_ = msg->eph;
 
   getting_gps_ = true;
+}
+//}
+
+/* homePositionCallback //{ */
+void Odometry2::homePositionCallback(const px4_msgs::msg::HomePosition::UniquePtr msg) {
+
+  if (!is_initialized_) {
+    return;
+  }
+
+  {
+    std::scoped_lock lock(px4_home_position_mutex_);
+
+    px4_home_position_ = *msg;
+  }
+
+  double out_x, out_y;
+
+  UTM(msg->lat, msg->lon, &out_x, &out_y);
+
+  if (!std::isfinite(out_x)) {
+    RCLCPP_ERROR_THROTTLE(this->get_logger(), *this->get_clock(), 1000, "[%s]: NaN detected in UTM variable \"out_x\"!!!", this->get_name());
+    return;
+  }
+
+  if (!std::isfinite(out_y)) {
+    RCLCPP_ERROR_THROTTLE(this->get_logger(), *this->get_clock(), 1000, "[%s]: NaN detected in UTM variable \"out_y\"!!!", this->get_name());
+    return;
+  }
+
+  {
+    std::scoped_lock lock(px4_utm_position_mutex_);
+
+    px4_utm_position_[0] = out_x;
+    px4_utm_position_[1] = out_y;
+  }
+
+  RCLCPP_INFO(this->get_logger(), "[%s]: GPS origin set! UTM x: %.2f, y: %.2f", this->get_name(), out_x, out_y);
+
+  getting_px4_utm_position_ = true;
 }
 //}
 
@@ -1083,7 +1141,7 @@ void Odometry2::state_odometry_init() {
     RCLCPP_INFO(get_logger(), "Odometry state: Check initial PX4 parameters settings.");
     if (checkPx4Params(init_px4_params_int_, init_px4_params_float_)) {
       RCLCPP_INFO(get_logger(), "Odometry state: All PX4 parameters are set correctly.");
-      set_initial_px4_params_   = false;
+      set_initial_px4_params_ = false;
     } else {
       RCLCPP_WARN(get_logger(), "Odometry state: Not all PX4 parameters are set correctly.");
       set_initial_px4_params_ = true;
@@ -1095,6 +1153,7 @@ void Odometry2::state_odometry_init() {
     if (setPx4Params(init_px4_params_int_, init_px4_params_float_)) {
       RCLCPP_INFO(get_logger(), "Odometry state: All initial PX4 parameters were set correctly.");
       px4_param_restart_required_ = true;
+      set_initial_px4_params_     = false;
       return;
     } else {
       if (manual_detected_) {
@@ -1108,10 +1167,12 @@ void Odometry2::state_odometry_init() {
   }
 
   // Handle static TF initialization
-  if (static_tf_broadcaster_ == nullptr) {
+  if (static_tf_broadcaster_ == nullptr && getting_px4_utm_position_) {
     static_tf_broadcaster_ = std::make_shared<tf2_ros::StaticTransformBroadcaster>(this->shared_from_this());
     publishStaticTF();
     RCLCPP_INFO(get_logger(), "Odometry state: Publishing static TF");
+  } else {
+    RCLCPP_WARN(get_logger(), "Odometry state: Waiting for UTM position to create TF structure.");
   }
 
   // Wait until gps estimator is ready. GPS is required to initalize hector
@@ -1815,6 +1876,9 @@ bool Odometry2::checkGpsTime() {
 
 // PublishStaticTF //{*/
 void Odometry2::publishStaticTF() {
+
+  std::scoped_lock lock(px4_utm_position_mutex_);
+
   std::vector<geometry_msgs::msg::TransformStamped> v_transforms;
 
   geometry_msgs::msg::TransformStamped tf;
@@ -1847,6 +1911,17 @@ void Odometry2::publishStaticTF() {
   v_transforms.push_back(tf);
 
   tf_local_origin_to_ned_origin_frame_ = tf;
+
+  tf.header.frame_id         = utm_origin_frame_;
+  tf.child_frame_id          = local_origin_frame_;
+  tf.transform.translation.x = px4_utm_position_[0];
+  tf.transform.translation.y = px4_utm_position_[1];
+  tf.transform.translation.z = 0;
+  tf.transform.rotation.w    = 1;
+  tf.transform.rotation.x    = 0;
+  tf.transform.rotation.y    = 0;
+  tf.transform.rotation.z    = 0;
+  v_transforms.push_back(tf);
 
   static_tf_broadcaster_->sendTransform(v_transforms);
 
@@ -2155,6 +2230,13 @@ void Odometry2::publishHectorOdometry() {
 }
 //}
 
+/* homePositionPublisher //{ */
+void Odometry2::homePositionPublisher(void) {
+  std::scoped_lock lock(px4_home_position_mutex_);
+  home_position_publisher_->publish(px4_home_position_);
+}
+//}
+
 
 // | ----------------------- Diagnostics ---------------------- |
 
@@ -2376,7 +2458,6 @@ bool Odometry2::getPx4Parameters(const std::shared_ptr<T>& request, const std::v
     RCLCPP_INFO(get_logger(), "Getting value of px4 parameter %s", std::get<0>(item).c_str());
     auto future_response = service_client->async_send_request(request);
     // If parameter has different value than requested, return false
-    px4_param_check_value_ = (float)std::get<1>(item);
     if (!checkPx4ParamGetOutput(future_response, (float)std::get<1>(item))) {
       return false;
     }
