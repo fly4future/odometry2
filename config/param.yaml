@@ -8,7 +8,6 @@ print_callback_min_dur: 0.002 # [s] shorter callback durations than this will be
 # px4 # #{
 px4:
   parameter_handle_timeout:  1 # Minimal value is 1. If zero, the parameter will never be set [s]
-  parameter_change: false # DO NOT CHANGE, DEBUG_PARAMETER - allow to change PX4 parameters
 
   EKF2_AID_MASK:    9 # GPS + EV_POS
   EKF2_RNG_AID:     1 # Using the range sensor for height fusion if specific conditions are met
