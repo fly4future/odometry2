@@ -1230,7 +1230,8 @@ void Odometry2::state_odometry_init() {
     publishStaticTF();
     RCLCPP_INFO(get_logger(), "Odometry state: Publishing static TF");
   } else {
-    RCLCPP_WARN(get_logger(), "Odometry state: Waiting for UTM position to create TF structure.");
+    RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000, "Odometry state: Waiting for UTM position/home position to create TF structure.");
+    return;
   }
 
   // Wait until gps estimator is ready. GPS is required to initalize hector

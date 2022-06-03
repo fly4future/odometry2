@@ -55,7 +55,7 @@ px4:
 gps:
     active: true
     num_init_msgs:  5 # number of messages to skip before using gps
-    eph_max:        2.5 # max deviation allowed to use gps source [m]
+    eph_max:        1000000.0 # max deviation allowed to use gps source [m]
     msg_good:       5 # number of messages to confirm good gps
     msg_err:        2 # number of messages to confirm bad gps
     msg_interval_max: 2.0 # max interval between messages before not reliable gps [s]
